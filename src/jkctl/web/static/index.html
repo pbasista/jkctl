@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- No data-theme here: the page picks one, from the system unless the
+     browser has been told otherwise.  See `useTheme` in js/app.js. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="referrer" content="no-referrer" />
+    <title>jkctl</title>
+    <!-- The shared design system first, then this program's tokens and
+         its own page-specific rules on top.  See devicectl-core. -->
+    <link rel="stylesheet" href="/core/core.css" />
+    <link rel="stylesheet" href="./app.css" />
+    <!-- The tab's icon is stamped from js/app.js, out of the same drawing
+         the header wears; see `MARK` there and `useFavicon` in the shared
+         shell.  It used to be a second, hand-encoded battery written out
+         here, which is how the tab and the header came to disagree.  This
+         placeholder is only so the browser does not go asking for a
+         /favicon.ico that does not exist while the module loads. -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <p style="padding: 24px">The jkctl web UI needs JavaScript.</p>
+    </noscript>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

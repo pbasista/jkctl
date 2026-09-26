@@ -1,0 +1,34 @@
+NOTICE
+======
+
+This project is licensed under the European Union Public Licence v1.2
+(EUPL-1.2) -- see LICENSE. Five files shipped in this distribution are not
+covered by that license and remain under their own terms:
+
+* ``src/jkctl/protocol_en.json`` and ``src/jkctl/protocol_zh.json`` -- the
+  BMS frame and field layout, decrypted from ``config/en_US.jsonds`` and
+  ``config/zh_CN.jsonds`` as shipped with JK BMS Monitor 3.11.0. Copyright
+  Chengdu JIKONG Technology Co., Ltd. Included unmodified (beyond
+  decryption) for interoperability with JK battery management systems; no
+  license to redistribute them is granted by this project beyond what
+  their copyright holder allows.
+
+* ``src/jkctl/protocols.json`` -- the UART, CAN and trigger-source lists
+  the same application shows in its drop-downs, extracted from its
+  resources. The English column beside each is this project's own
+  translation and is covered by the EUPL like the rest of it. Same
+  copyright holder for the original strings, same terms.
+
+* ``src/jkctl/logcodes.json`` -- what the same application calls each code
+  a JK board writes into its stored fault records, extracted from its
+  code. Same copyright holder, same terms.
+
+  How all four were obtained is recorded in ``docs/how-it-works.md`` and,
+  in full, in ``research/windows/windows-findings.md``.
+
+* ``src/jkctl/web/static/vendor/preact-htm.module.js`` -- Preact and htm,
+  bundled as one ES module. Copyright Jason Miller and contributors, MIT
+  License; the full notice is embedded as a comment at the top of the file.
+  Upstream: https://preactjs.com/ and https://github.com/developit/htm
+
+Everything else in this distribution is licensed under the EUPL-1.2.

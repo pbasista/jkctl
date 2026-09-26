@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  # A pull request from a branch of this repository was already checked by
+  # the push above; listening to both would run every one of them twice.
+  # A fork's branch produces no push event here, so the `if` on the job
+  # below lets those -- and only those -- through.
+  pull_request:
+  # release.yml calls this workflow before it builds, so a tag cannot
+  # publish what the checks have not passed.
+  workflow_call:
+
+permissions:
+  contents: read
+
+# A newer commit on the same branch makes the older run's answer moot.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      # --locked: a uv.lock that no longer matches pyproject.toml is a
+      # mistake to report, not one to paper over with a fresh resolution.
+      # --group browser: the V8 htmcheck parses templates in is kept out of
+      # the default set so that installing and developing jkctl stays light
+      # on an armv7 host.  CI is where it must not be missing: without it
+      # htmcheck and its tests would skip, and skip green.
+      - run: uv sync --locked --group browser
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run ty check
+      # The browser half: Biome parses and lints it, and the two cross-file
+      # checks out of `devicectl.devtools` run under pytest.
+      - run: uv run pytest

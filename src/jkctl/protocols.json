@@ -1,0 +1,299 @@
+{
+  "uart": {
+    "items": [
+      {
+        "id": 0,
+        "en": "000 - 4G/GPS remote module, generic protocol V2.4",
+        "name": "000 - 4G-GPS远程模组通用协议V2.4"
+      },
+      {
+        "id": 1,
+        "en": "001 - JK BMS RS485 Modbus generic protocol V1.0",
+        "name": "001 - 极空BMS RS485 Modbus通用协议V1.0"
+      },
+      {
+        "id": 2,
+        "en": "002 - NIU U-series generic protocol",
+        "name": "002 - 小牛U系列通用协议"
+      },
+      {
+        "id": 3,
+        "en": "003 - China Tower battery-swap cabinet generic protocol V1.1",
+        "name": "003 - 铁塔换电柜通用协议V1.1"
+      },
+      {
+        "id": 4,
+        "en": "004 - PACE RS485 Modbus V1.3",
+        "name": "004 - 沛城RS485 Modbus V1.3"
+      },
+      {
+        "id": 5,
+        "en": "005 - Pylontech low-voltage storage RS485 protocol V3.5",
+        "name": "005 - 派能低压储能RS485协议V3.5"
+      },
+      {
+        "id": 6,
+        "en": "006 - Growatt RS485 protocol 1xSxxP ESS Rev2.01",
+        "name": "006 - 古瑞瓦特RS485通信协议_1xSxxP_ESS_Rev2.01"
+      },
+      {
+        "id": 7,
+        "en": "007 - Voltronic Power inverter RS485 protocol, 2020-03-25",
+        "name": "007 - 日月元逆变器与485通信协议20200325"
+      },
+      {
+        "id": 8,
+        "en": "008 - China Tower battery-swap cabinet generic protocol V2.0",
+        "name": "008 - 铁塔换电柜通用协议V2.0"
+      },
+      {
+        "id": 9,
+        "en": "009 - SRNE RS485 Modbus V1.3",
+        "name": "009 - 硕日RS485_Modbus_V1.3"
+      },
+      {
+        "id": 10,
+        "en": "010 - JK BMS display protocol V2.0",
+        "name": "010 - 极空BMS显示器协议V2.0"
+      },
+      {
+        "id": 11,
+        "en": "011 - serial port 1, customised",
+        "name": "011 - 串口1客制化"
+      },
+      {
+        "id": 12,
+        "en": "012 - serial port 2, customised",
+        "name": "012 - 串口2客制化"
+      },
+      {
+        "id": 13,
+        "en": "013 - (9600) JK BMS RS485 Modbus generic protocol V1.0",
+        "name": "013 - (9600)极空BMS RS485 Modbus通用协议V1.0"
+      },
+      {
+        "id": 14,
+        "en": "014 - (9600) Pylontech low-voltage storage RS485 protocol V3.5",
+        "name": "014 - (9600)派能低压储能RS485协议V3.5"
+      },
+      {
+        "id": 15,
+        "en": "015 - JK storage display protocol V1.0",
+        "name": "015 - 极空储能显示器通信协议V1.0"
+      },
+      {
+        "id": 16,
+        "en": "016 - JK LIN bus generic protocol V1.0",
+        "name": "016 - 极空LIN总线通用协议V1.0"
+      },
+      {
+        "id": 17,
+        "en": "017 - RS485 protocol 17",
+        "name": "017 - RS485协议17"
+      },
+      {
+        "id": 18,
+        "en": "018 - RS485 protocol 18",
+        "name": "018 - RS485协议18"
+      },
+      {
+        "id": 19,
+        "en": "019 - RS485 protocol 19",
+        "name": "019 - RS485协议19"
+      },
+      {
+        "id": 20,
+        "en": "020 - RS485 protocol 20",
+        "name": "020 - RS485协议20"
+      }
+    ]
+  },
+  "can": {
+    "items": [
+      {
+        "id": 0,
+        "en": "000 - JK BMS CAN protocol (250 kbit/s) V2.0",
+        "name": "000 - 极空BMS CAN接口协议(250K)V2.0"
+      },
+      {
+        "id": 1,
+        "en": "001 - Deye low-voltage storage CAN protocol V1.0",
+        "name": "001 - 德业低压储能CAN通信协议 V1.0"
+      },
+      {
+        "id": 2,
+        "en": "002 - Pylontech low-voltage CAN protocol V1.2",
+        "name": "002 - 派能低压CAN通信协议V1.2"
+      },
+      {
+        "id": 3,
+        "en": "003 - Growatt low-voltage CAN protocol REV05",
+        "name": "003 - 古瑞瓦特低压CAN通信协议REV05"
+      },
+      {
+        "id": 4,
+        "en": "004 - Victron Energy CAN-bus BMS protocol, 2017-07-17",
+        "name": "004 - 维克多_CAN通信协议l_20170717"
+      },
+      {
+        "id": 5,
+        "en": "005 - Megarevo hybrid inverter CAN protocol",
+        "name": "005 - 迈格瑞能混合逆变器CAN通信协议"
+      },
+      {
+        "id": 6,
+        "en": "006 - JK BMS CAN protocol (500 kbit/s) V2.0",
+        "name": "006 - 极空BMS CAN接口协议(500K)V2.0"
+      },
+      {
+        "id": 7,
+        "en": "007 - INVT low-voltage BMS protocol V1.02",
+        "name": "007 - 英威腾低压版BMS通信协议V1.02"
+      },
+      {
+        "id": 8,
+        "en": "008 - GoodWe low-voltage BMS protocol (EX/EM/S-BP/BP)",
+        "name": "008 - 固德威低压BMS通信协议(EX/EM/S-BP/BP)"
+      },
+      {
+        "id": 9,
+        "en": "009 - SMA battery-to-inverter protocol V1.0",
+        "name": "009 - SMA电池与逆变器通信协议V1.0"
+      },
+      {
+        "id": 10,
+        "en": "010 - MUST PV1800F series CAN protocol V1.04.04",
+        "name": "010 - 美世乐PV1800F-系列CAN通信协议V1.04.04"
+      },
+      {
+        "id": 11,
+        "en": "011 - Luxpowertek battery CAN protocol V01",
+        "name": "011 - 鹏城CAN通信协议V01"
+      },
+      {
+        "id": 12,
+        "en": "012 - CAN bus, customised",
+        "name": "012 - CAN总线客制化"
+      },
+      {
+        "id": 13,
+        "en": "013 - CAN bus, customised 2",
+        "name": "013 - CAN总线客制化2"
+      },
+      {
+        "id": 14,
+        "en": "014 - CAN protocol 014",
+        "name": "014 - CAN协议014"
+      },
+      {
+        "id": 15,
+        "en": "015 - CAN protocol 015",
+        "name": "015 - CAN协议015"
+      },
+      {
+        "id": 16,
+        "en": "016 - CAN protocol 016",
+        "name": "016 - CAN协议016"
+      },
+      {
+        "id": 17,
+        "en": "017 - CAN protocol 017",
+        "name": "017 - CAN协议017"
+      },
+      {
+        "id": 18,
+        "en": "018 - CAN protocol 018",
+        "name": "018 - CAN协议018"
+      },
+      {
+        "id": 19,
+        "en": "019 - CAN protocol 019",
+        "name": "019 - CAN协议019"
+      },
+      {
+        "id": 20,
+        "en": "020 - CAN protocol 020",
+        "name": "020 - CAN协议020"
+      }
+    ]
+  },
+  "trigger": {
+    "items": [
+      {
+        "id": 0,
+        "en": "00 - no trigger",
+        "name": "00 - 无触发"
+      },
+      {
+        "id": 1,
+        "en": "01 - state of charge too low",
+        "name": "01 - 电量过低"
+      },
+      {
+        "id": 2,
+        "en": "02 - pack over-voltage",
+        "name": "02 - 电池超压"
+      },
+      {
+        "id": 3,
+        "en": "03 - pack under-voltage",
+        "name": "03 - 电池欠压"
+      },
+      {
+        "id": 4,
+        "en": "04 - cell over-voltage",
+        "name": "04 - 电芯超压"
+      },
+      {
+        "id": 5,
+        "en": "05 - cell under-voltage",
+        "name": "05 - 电芯欠压"
+      },
+      {
+        "id": 6,
+        "en": "06 - charge over-current",
+        "name": "06 - 充电过流"
+      },
+      {
+        "id": 7,
+        "en": "07 - discharge over-current",
+        "name": "07 - 放电过流"
+      },
+      {
+        "id": 8,
+        "en": "08 - pack over-temperature",
+        "name": "08 - 电池超温"
+      },
+      {
+        "id": 9,
+        "en": "09 - MOS over-temperature",
+        "name": "09 - MOS管超温"
+      },
+      {
+        "id": 10,
+        "en": "10 - system alarm",
+        "name": "10 - 系统告警"
+      },
+      {
+        "id": 11,
+        "en": "11 - pack low temperature",
+        "name": "11 - 电池低温"
+      },
+      {
+        "id": 12,
+        "en": "12 - GPS remote control",
+        "name": "12 - GPS远程控制"
+      },
+      {
+        "id": 13,
+        "en": "13 - state of charge out of range",
+        "name": "13 - 电量超限"
+      },
+      {
+        "id": 14,
+        "en": "14 - MOS fault",
+        "name": "14 - MOS管异常"
+      }
+    ]
+  }
+}

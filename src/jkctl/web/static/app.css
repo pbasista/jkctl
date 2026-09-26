@@ -1,0 +1,423 @@
+/* jkctl web UI -- dark first, on true black.
+ *
+ * A battery bank gets checked in a garage at night as often as at a desk, so
+ * the canvas is #000 and what glows is text and small accents, never a large
+ * field.  Panels sit far enough above the canvas to read as panels and their
+ * edge does the separating, so nothing has to be bright to be findable.
+ *
+ * Colour has jobs, not decoration.  The one thing that must be unmistakable
+ * at a glance is *a protection has tripped*, so:
+ *   green  -- inside its limits: charging, balanced, healthy
+ *   amber  -- worth a look: a wide cell spread, a waived check, a warning
+ *   rose   -- a raised protection, or something irreversible about to happen
+ *   blue   -- the primary: identity, links, focus, a bus at rest
+ * A cell chart is drawn in one hue with the ends called out, because sixteen
+ * colours would say sixteen things and there is only one thing to say.
+ */
+
+:root {
+  --bg: #000000;
+  --surface: #12181f;
+  --surface-2: #1a222c;
+  --surface-3: #24303d;
+  --line: #38485a;
+  --line-strong: #52677e;
+
+  /* Three tiers, and all three are meant to be read: --text-dim carries the
+   * field labels, so it stays above 7:1 on a panel, and even --text-faint
+   * clears 6:1.  Labels at 3.8:1 are fine in a bright room and unreadable in
+   * a dark one, which is the room this page is for. */
+  --text: #e8eef4;
+  --text-dim: #b3c1cf;
+  --text-faint: #93a3b4;
+
+  --primary: #45a3dd;
+  --primary-bright: #7cc6f2;
+  --primary-deep: #10314a;
+  --warn: #e8a33c;
+  --warn-deep: #3d2d0d;
+  --ok: #35c294;
+  --ok-bright: #63d9b3;
+  --ok-deep: #0d3a2e;
+  --danger: #e2717c;
+  --danger-deep: #46181e;
+  --violet: #a78bfa;
+
+  /* The same amber: this page has never had a separate "something is
+   * happening now" -- a read that takes a moment is the bar, not a colour.
+   * Two tokens so the shared stylesheet can say which it means. */
+  --live: var(--warn);
+  --live-deep: var(--warn-deep);
+
+  /* A switch that is on is green here, not blue.  The switches on this page
+   * are the pack's own -- charge, discharge, balance -- and green is this
+   * page's word for *inside its limits, working*: the badge on a healthy
+   * pack, the calm stretch of a band, the tile of a board that answered.
+   * Blue is identity and links.  A blue switch would be the one control
+   * here that says "on" in a colour nothing else on the page says it in.
+   * The token is the shared stylesheet's; alfenctl leaves it alone and
+   * gets its own blue. */
+  --switch-on: var(--ok);
+
+  /* The mark's gold.  Its own token rather than --warn, which has a job:
+   * amber means "worth a look" and the brand means nothing at all.  Two
+   * values because a gold bright enough to carry on black is 1.9:1 on white;
+   * the light one is 4.2:1 there, above the 3:1 a graphic needs. */
+  --brand: #f5b32c;
+
+  /* The tab icon's two colours: the battery, and the tile it sits on.
+   *
+   * Their own tokens rather than --brand and --surface, because those two
+   * follow the theme and a tab icon must not.  It is drawn once, on a dark
+   * tile, and shown in browser chrome that is light on one machine and dark
+   * on the next; the gold that reads on that tile is the dark theme's,
+   * whichever theme this page happens to be wearing.  Read from here by
+   * `useFavicon` -- see the mark in js/app.js, which is the same drawing
+   * the header wears. */
+  --tab-mark: #f5b32c;
+  --tab-tile: #0d1218;
+
+  /* Every measurement -- the radii, the gaps, a card's padding, the label
+   * column, the page's own width and gutter -- is `/core/core.css`'s, and
+   * is deliberately not repeated here.  Two programs that are meant to be
+   * one program in two colours cannot each keep their own copy of how wide
+   * a label column is; that is how they came to be 10.5rem here and 9.5rem
+   * there.  Nothing below this line sets a size, and neither does
+   * `color-scheme`: core.css follows the theme this page stamps. */
+
+  /* What lifts a slider's thumb off the track.  A light theme gets this from
+   * the browser's own widget shadow; on near black a black shadow is
+   * invisible, so the lift there is a faint light rim. */
+  --slider-lift: drop-shadow(0 1px 2px rgb(0 0 0 / 70%))
+    drop-shadow(0 0 1px rgb(232 238 244 / 45%));
+
+  /* The two ends of a progress bar's fill.  The palette's own blue and amber
+   * are chosen to be read as *text* on a light page, which makes them far too
+   * dark as a large filled area. */
+  --bar-from: var(--primary);
+  --bar-to: var(--warn);
+
+}
+
+[data-theme="light"] {
+  --bg: #f5f7f9;
+  --surface: #ffffff;
+  --surface-2: #f0f3f6;
+  --surface-3: #e5eaef;
+  --line: #dbe1e8;
+  --line-strong: #bfc9d4;
+  --text: #101720;
+  --text-dim: #3d4854;
+  --text-faint: #59646f;
+  --primary: #1a6ea6;
+  --primary-bright: #12507c;
+  --primary-deep: #ddeaf5;
+  --warn: #9a6408;
+  --warn-deep: #fbf0da;
+  --ok: #10795c;
+  --ok-bright: #0b5f48;
+  --ok-deep: #dbf1e9;
+  --danger: #b4323f;
+  --danger-deep: #fadfe2;
+  --violet: #6d47d6;
+  --brand: #a86f06;
+  --slider-lift: none;
+  --bar-from: #3f9ad6;
+  --bar-to: #e8a33c;
+}
+
+/* --- layout -------------------------------------------------------------
+ *
+ * There is none here any more.  The page's own column, the header's two
+ * rows and the tab strip are all `/core/core.css`, drawn by `Header` in the
+ * shared shell -- this program had its own and the other program had
+ * another, so two pages that share a stylesheet still put their wordmark,
+ * their first tab and their first card at three different left edges. */
+
+/* The wordmark and the version beside it are `Brand` from the shared shell,
+ * and `core.css` dresses them.  What is this program's is the mark in front
+ * of the name, below -- and the colour the name goes on hover, which
+ * core.css asks the page for and defaults to the primary. */
+.brand {
+  --brand-hover: var(--brand);
+}
+
+/* The mark itself -- a battery, half charged -- is drawn in js/app.js and
+ * rendered by `Glyph` from the shared shell, which is also what puts it in
+ * the browser's tab.  It was three boxes built out of borders and two
+ * pseudo-elements here, and a second, different battery percent-encoded
+ * into a `data:` URI in index.html: one drawing in the header, another in
+ * the tab, and no way to notice they had stopped matching.  What is left
+ * here is its colour -- the gold, which is the whole reason this program's
+ * mark has a token of its own -- and the colour the name goes on hover,
+ * above.
+ */
+.brand .glyph {
+  color: var(--brand);
+}
+
+/* The tab strip -- where it sits, how big it is, and the bar that appears
+ * under the one the pointer is over -- is `core.css`'s.  This page had its
+ * own: a quieter resting colour, no underline on hover, and 9px of padding
+ * against the other page's 10px, which is two tab strips that behave
+ * differently in two programs meant to be one. */
+
+/* --- rows ---------------------------------------------------------------
+ *
+ * A row is `core.css`'s two-column grid, at the shared label width.  This
+ * page had drawn its own -- a flex row, baseline-aligned, with its own
+ * padding and its own label column -- so the same field was a different
+ * shape depending on which of the two programs was showing it. */
+
+/* A value's editor and its unit are one thing and must not wrap apart: the
+ * unit ending up on its own line under the box is what a form looks like
+ * when nobody checked it at a narrow width. */
+.row .v > .wrap {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.row .v input.num {
+  width: 7rem;
+  /* flex: none, or a button beside it in the same nowrap row squeezes the
+   * box down to its placeholder and the value cannot be read while it is
+   * being typed. */
+  flex: none;
+}
+
+.big {
+  font-size: 30px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+/* The same reading, in the weight `alfenctl`'s Live meter draws its kW at.
+ * A state of charge is a number somebody glances at and is done with, and it
+ * is the only thing on its card drawn large; the History card's power sits
+ * above a chart of itself and is read together with it, which is exactly
+ * what the other page's meter does -- so it is drawn the way that one is.
+ * The width is still tabular: it changes every couple of seconds, and a
+ * figure that shifts sideways as it counts is harder to read than a bold
+ * one. */
+.big.light {
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  /* And the same air under it.  The chart sat straight against the digits,
+   * because this reading is set solid (line-height 1.1) where the charger's
+   * is set at the body's 1.55 with 14px of margin under that: measured on
+   * both pages, the charger's kW has 29px from its baseline to the top of
+   * its chart and this had 6.  23px more puts this one at 29 too. */
+  margin-bottom: 23px;
+}
+
+/* A suffix on a big reading, in the flow of it -- not the right-aligned
+ * column `core.css` gives a unit that sits beside an input, which is what
+ * bare `.unit` means everywhere else on both pages. */
+.big .unit {
+  flex: 0 0 auto;
+  min-width: 0;
+  text-align: left;
+  font-size: var(--fs-base);
+  font-weight: 450;
+  color: var(--text-faint);
+  margin-left: 3px;
+}
+
+/* A row of labelled readings is `.stats` from `core.css` now, and each one
+ * is its `Stat`.  Both pages had a widget under the name `.stat` and they
+ * were two different widgets -- a bordered capsule there, a stacked pair
+ * here -- so a rule written against `.stat` meant one thing or the other
+ * depending on which page it landed on. */
+
+/* --- badges and pills ---------------------------------------------------
+ *
+ * Both are `core.css`'s.  The badge was redrawn here with a fill behind it
+ * and its letters left as typed, and the pill was redrawn from scratch --
+ * a capsule that recolours its own text where the other program's tints its
+ * border -- which is two headers that do not read as one program at the one
+ * glance a header is for. */
+
+/* --- controls -----------------------------------------------------------
+ *
+ * A button, an input, a select and a checkbox are `core.css`'s.  This page
+ * had its own of each, a pixel or two off the other program's in every
+ * direction -- 5px of padding against 6px, a different hover, a different
+ * focus ring -- which is the whole of what makes two pages feel like two
+ * programs. */
+
+input.num {
+  width: 8.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- tables ------------------------------------------------------------- */
+
+/* The table -- its head, its rules, its numeric column, the scroller a tall
+ * one sits in -- is `core.css`'s.  This page had drawn its own: a head in
+ * the panel fill with 4px of padding against the other page's lifted grey
+ * with 10px, and a rule between rows at 55% of the line colour against the
+ * full one.  Two programs, two tables, one stylesheet.  Nothing of it is
+ * left here. */
+
+/* --- the bank -----------------------------------------------------------
+ *
+ * The tiles themselves -- the grid, the coloured left edge, the head with
+ * the identifier in it -- are `.tiles` and `.tile` in `core.css`, because
+ * alfenctl draws the same view of the chargers it can see.  What is a
+ * battery's own is the charge bar. */
+
+.soc-bar {
+  height: 7px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  overflow: hidden;
+  margin: 8px 0 4px;
+}
+
+.soc-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+
+.soc-bar.warn > span {
+  background: var(--warn);
+}
+
+.soc-bar.bad > span {
+  background: var(--danger);
+}
+
+/* --- charts ------------------------------------------------------------- */
+
+/* The line chart -- the plot, the fill, the write marks, the row of ends --
+ * is `/core/core.css`'s, beside the component both pages draw it with.
+ * What is here is the one picture only a battery has: a bar per cell. */
+
+.cellbars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 150px;
+  /* Room above the tallest bar for the balancer's mark (see below), always
+   * rather than while it runs, so the bars do not shrink when it starts. */
+  padding-top: 16px;
+}
+
+.cellbar {
+  flex: 1;
+  min-width: 4px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+  position: relative;
+}
+
+.cellbar.high {
+  background: var(--warn);
+}
+
+.cellbar.low {
+  background: var(--violet);
+}
+
+/* A cell the balancer is working on.  Striped over its own colour -- which
+ * is already the highest's or the lowest's, since those are the two a JK
+ * balancer works between -- and marked above with the way the charge goes:
+ * down out of the cell it takes from, up into the one it gives to.  A thin
+ * outline was all it had, which at three pixels wide was a bar a shade
+ * different from the fifteen beside it. */
+.cellbar.balancing {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--surface) 42%, transparent) 3px 6px
+  );
+}
+
+.cellbar.balancing::after {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 2px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-dim);
+}
+
+.cellbar.giving::after {
+  content: "▼";
+}
+
+.cellbar.taking::after {
+  content: "▲";
+}
+
+
+/* The one the pointer is on.  The label above the chart says which cell it
+ * is reading; this is what says which bar that label is about, on a card
+ * where the bars are a few pixels apart and the label is not over any of
+ * them. */
+.cellbar.under {
+  filter: brightness(1.35);
+}
+
+/* The numbers under the bars are the same row of slots again: the same
+ * gap, the same `flex: 1`, and no pad at either end.  The pointer is
+ * counted against the bars alone, so a bar the label is about is the one
+ * whose number is under the pointer only while these two agree. */
+.celllabels {
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.celllabels > span {
+  flex: 1;
+  min-width: 4px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- notices ------------------------------------------------------------ */
+
+.notice {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  padding: 8px 12px;
+  font-size: var(--fs-sm);
+  margin: var(--gap) 0 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.notice.error {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  background: var(--danger-deep);
+  color: var(--danger);
+}
+
+.notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 50%, transparent);
+  background: var(--warn-deep);
+  color: var(--warn);
+}
+
+/* The folding explanation under a card's title is `core.css`'s `.help`.
+ * This page had it at a different colour with a different margin. */
+
+/* --- dialogs and toasts -------------------------------------------------
+ *
+ * All of it `core.css`'s.  This page carried its own backdrop, dialog box
+ * and toast -- three widgets it had never drawn, because nothing on it
+ * opened a dialog until the board picker did. */
+
+.gap {
+  margin-top: var(--gap);
+}

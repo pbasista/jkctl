@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Never commit vendor firmware images or encrypted datasource containers
+*.jkbms
+*.jsonds
+*.bin
+*.hex
+
+# Probe output and local scratch
+probe-result*.json
+probe-result*.log
+probe*.json
+probe*.log
+
+# Build output and tool caches
+/dist/
+.ruff_cache/
+.pytest_cache/

@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag must not publish what the checks have not passed.
+  check:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: check
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write   # to create the GitHub release
+      id-token: write   # for PyPI trusted publishing; no token to keep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The version lives in one place.  A tag that disagrees with it would
+      # publish something under a name nobody can reproduce from the source.
+      - name: The tag must match __version__
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(grep -Po '(?<=^__version__ = ")[^"]+' src/jkctl/__init__.py)"
+          if [ "$tag" != "$version" ]; then
+            echo "tag $tag does not match __version__ $version" >&2
+            exit 1
+          fi
+
+      - run: uv build
+
+      # Install the wheel that is about to be published, on its own, and see
+      # that it runs -- a missing package data file would show up here.
+      - name: Smoke-test the built wheel
+        run: |
+          uv run --no-project --with dist/*.whl jkctl --version
+          uv run --no-project --with dist/*.whl jkctl protocols list --can
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/*

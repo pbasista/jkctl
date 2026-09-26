@@ -1,0 +1,10 @@
+# The findings notes are tracked; the material they were extracted from
+# (JK's Windows installer and its DLLs, the Android APK, 67 firmware
+# images, the Ghidra projects) stays local -- it is JK's to distribute,
+# not ours, and it is around 195 MB.
+/windows/*
+!/windows/windows-findings.md
+/android/
+/firmware/
+*.pdf
+*.jpeg
