@@ -17,7 +17,7 @@ import { html, useState } from '/core/vendor/preact-htm.module.js';
 
 function Checklist({ checks }) {
   return html`<ul class="list">
-    ${checks.map(
+    ${ordered(checks).map(
       (c) => html`<li key=${c.name}>
         ${c.ok
           ? html`<${Badge} tone="good">ok<//>`
@@ -115,34 +115,24 @@ export function FirmwareTab({
         summary: 'What this does, and what it costs if it stops halfway.',
         body: html`The arming write puts the board into its bootloader and the link becomes
           a raw XMODEM stream; nothing else may use the port until the transfer ends, so the
-          live refresh stops for the duration. An interrupted transfer leaves the unit in
-          its bootloader with no application to run. <b>This path has never been exercised
-          against a real BMS</b> — the sender matches a capture of the vendor's application
-          byte for byte, but the receiving side is a bootloader that ships in no firmware
-          file and could not be read.`,
+          live refresh stops for the duration. This path has completed successfully on
+          repeated flashes of official V15.41 to the same JK_PB2A16S20P. That is evidence for
+          this one model, hardware revision and firmware version — not for others. An
+          interrupted transfer can still leave no working application.`,
       }}
     >
-      <div class="notice" style="margin-bottom:12px">
-        <p style="margin:0 0 8px">
-          The image sent is <b>exactly the vendor's</b> — the file is decoded the way JK's
-          application decodes it, and its bytes match a vendor image to the SHA-256. The risk
-          is not in what is sent; it is in what the BMS does with it.
+      <div class="notice stack" style="margin-bottom:12px">
+        <p style="margin:0">
+          The bytes sent are <b>exactly the vendor's</b> — decoded the way JK's application
+          decodes them and SHA-256-matched to a vendor image. The risk is what the BMS does
+          with them, not what is sent.
         </p>
         <p class="caveat" style="margin:0">
           <span>!</span>
           <span>
-            The BMS is <b>not known to verify</b> what it receives: the file carries no
-            signature and no whole-image checksum, JK's application checks only the model,
-            version and expiry, and the receiving bootloader ships in no firmware file, so it
-            could never be read. On the wire the only guard is XMODEM's weak 8-bit per-block
-            checksum. Assume a wrong or corrupt image can be written and run. A failed or
-            interrupted flash leaves the unit with no working application; re-arming the
-            upgrade over RS485 is done by the application, so a dead app cannot be reflashed
-            over the wire. Recovery is then a hardware bench job — the STM32 ROM bootloader
-            (BOOT0 high, a USB-TTL adapter, stm32flash), which can rewrite the application
-            from the image jkctl extracts if the MCU's readout protection is off. If it is
-            on, clearing it mass-erases the JK bootloader too, and recovery then needs a
-            full image this tool does not have.
+            The bootloader accepts a wrong, corrupt or oversized image — it checks no
+            signature, length or whole-image checksum. A failed flash can leave no working
+            application, recoverable only on the bench (BOOT0 + stm32flash).
           </span>
         </p>
       </div>
@@ -178,20 +168,27 @@ export function FirmwareTab({
       title="Library"
       width="full"
       help=${{
-        summary: 'Every .jkbms in a directory, judged against this unit.',
+        summary: 'Every .jkbms in a directory on the jkctl host, judged against this unit.',
         body: html`JK ships firmware as a tree of one directory per hardware version, each
           holding one file per model. Point this at that tree and it says which of them this
-          board would take, rather than making you open them one at a time to find out.`,
+          board would take, rather than making you open them one at a time to find out.
+          The path is read on the <b>computer where jkctl is running</b> (the server), so it
+          is that machine's filesystem — not this browser's — that is walked.`,
       }}
-      foot=${html`<div class="wrap">
-        <input
-          type="text"
-          placeholder="/path/to/firmware"
-          value=${dir}
-          onInput=${(e) => setDir(e.target.value)}
-          style="min-width:20rem"
-        />
-        <button class="btn" disabled=${busy} onClick=${() => onLibrary(dir)}>Read it</button>
+      foot=${html`<div>
+        <p class="note flush" style="margin-bottom:8px">
+          A directory on the <b>computer running jkctl</b> (the server), not on this device.
+        </p>
+        <div class="wrap">
+          <input
+            type="text"
+            placeholder="/path/to/firmware on the jkctl host"
+            value=${dir}
+            onInput=${(e) => setDir(e.target.value)}
+            style="min-width:20rem"
+          />
+          <button class="btn" disabled=${busy} onClick=${() => onLibrary(dir)}>Read it</button>
+        </div>
       </div>`}
     >
       ${libraryError ? html`<div class="notice error">${libraryError}</div>` : null}
@@ -221,9 +218,10 @@ export function FirmwareTab({
                         : f.compatible
                           ? html`<${Badge} tone="good">would flash<//>`
                           : html`<${Badge}
-                              title=${(f.checks || []).filter((c) => c.blocking).map((c) => c.detail).join('\n')}
+                              tone="bad"
+                              title=${blockingDetails(f.checks).join('\n')}
                             >
-                              ${(f.checks || []).filter((c) => c.blocking).map((c) => c.name)[0] || 'no'}
+                              ${verdict(f.checks).join(', ') || 'no'}
                             <//>`}
                     </td>
                   </tr>`,
@@ -251,10 +249,11 @@ export function FirmwareTab({
             <p class="caveat">
               <span>!</span>
               <span>
-                Flashing is irreversible, and an interrupted transfer leaves the unit in its
-                bootloader with no application. The BMS is not known to verify what it
-                receives, and this transfer path has never been run against a real BMS. Do
-                not do this to a battery you cannot afford to lose.
+                Flashing is irreversible, and an interrupted transfer can leave the unit with
+                no working application. This path has succeeded on repeated flashes of
+                official V15.41 to a JK_PB2A16S20P; other model, hardware and firmware
+                combinations remain unverified. The bootloader has no end-to-end image or
+                length check. Do not do this to a battery you cannot afford to lose.
               </span>
             </p>
             ${force ? html`<p class="caveat"><span>!</span><span>Force is on: the expiry and minor-version checks are waived.</span></p>` : null}
@@ -268,6 +267,43 @@ export function FirmwareTab({
  * waived rather than failed, which is exactly what the server will do. */
 function waive(check) {
   if (check.ok) return check;
-  const waivable = check.kind === 'expiry' || check.name === 'minor version is newer';
+  const waivable = check.kind === 'expiry' || check.name === 'minor version';
   return waivable ? { ...check, waived: true, blocking: false } : check;
+}
+
+/* The verdict for a library row names every reason it was turned down, worst
+ * first -- so a file for the wrong board that is also not newer says "wrong
+ * model" and not only "not newer", which is all the vendor's dialog would say.
+ * Mirrors `_why`/`_verdict` in cli/commands/firmware.py. */
+const WHY = {
+  model: 'wrong model',
+  'major version': 'wrong major version',
+  'device version': 'unit version unreadable',
+  expiry: 'expired build',
+  'minor version': 'not newer',
+};
+const WHY_ORDER = {
+  model: 0,
+  'major version': 1,
+  'device version': 2,
+  expiry: 3,
+  'minor version': 4,
+};
+
+/* One order for every place the gate is shown -- the checklist under "Check a
+ * file", the library's verdict column and its tooltip -- so the same file
+ * never reads its reasons in one order here and another there. Most important
+ * first: a wrong board or major version, then the rest. */
+function ordered(checks) {
+  return (checks || [])
+    .slice()
+    .sort((a, b) => (WHY_ORDER[a.name] ?? 99) - (WHY_ORDER[b.name] ?? 99));
+}
+
+function verdict(checks) {
+  return ordered((checks || []).filter((c) => c.blocking)).map((c) => WHY[c.name] || c.name);
+}
+
+function blockingDetails(checks) {
+  return ordered((checks || []).filter((c) => c.blocking)).map((c) => c.detail);
 }

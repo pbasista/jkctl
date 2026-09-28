@@ -68,7 +68,7 @@ the only adapter on the machine, in which case there is nothing to ask.
 | `0x1200` | runtime data (frame/02) | read only |
 | `0x1400` | device info (frame/03) | read, with a documented writable subset |
 | `0x1600` | action slots | write only |
-| `0x1800` / `0x1A00` | *candidates* for the system log and the fault records | unproven; `probe` sweeps them read-only |
+| `0x1800` and up | not served: a read is bounded to `0x1000`-`0x15FF`, so the fault records are not on this interface (they live in flash) | refused by the firmware |
 
 The action slots are slot numbers, not byte offsets:
 
@@ -84,6 +84,7 @@ The action slots are slot numbers, not byte offsets:
 | `0x18` | factory restore -- **undocumented**, same source |
 | `0x1A` | erase all data -- **undocumented**, same source |
 | `0x26` | firmware upgrade arming -- **undocumented**, in neither revision of JK's register map |
+| `0x2E` | full-flash block read -- present only in an exact-image-locked audited dump patch |
 
 ## Notes and limitations
 
@@ -178,13 +179,13 @@ known.
   a probe the unit still counts as connected and publishes no temperature
   for.
 
-### Not proven on hardware
+### Hardware evidence and remaining gaps
 
-- **No write has ever reached a real BMS.** Every write path here is derived
-  from JK's register map and from the vendor application's serializer, and
-  exercised only against `jkctl simulate`. Start with a register rewritten
-  with the value just read from it.
-
+- **Firmware upgrade has one successful hardware result.** `jkctl` flashed
+  official `73-JK-PB2A16S20P-V15.41.jkbms` to one physical
+  `JK_PB2A16S20P`; the board rebooted and operated normally afterward. This
+  establishes that sender, bootloader and image combination only. Other models,
+  hardware revisions and firmware versions remain unverified.
 - **Settings writes may be password-gated.** JK's application has a
   settings-password dialog and a `Dynamic key is invalid!` string that the
   reverse engineering never resolved; `settingPassword` sits at register
@@ -196,41 +197,36 @@ known.
   well below the measured read cap. `jkctl probe --probe-writes` measures the
   real ceiling, writing only bytes it has just read back.
 
-- **The firmware transfer has never run on a BMS.** The arming write matches a
-  capture of JK's own application byte for byte
-  (`01 10 16 26 00 01 02 00 00 D6 97`), and the XMODEM block format was
-  recovered from its sender, but the receiving side is the bootloader, which
-  ships in no `.jkbms` file and could not be read.
+- **The captured bootloader has weak per-block checks, not image validation.**
+  Its receiver matches JK's XMODEM-128 sender and checks the block number,
+  complemented block number and 8-bit additive checksum. It has no signature,
+  whole-image checksum, model/version check, expected block count, destination
+  upper bound or flash readback. EOT can end the transfer at any length; launch
+  checks only that the application's initial stack pointer resembles SRAM.
+  Therefore a wrong, corrupt, truncated or oversized image can be written and
+  may be run.
 
-- **The bytes sent are verified; the device's defence against bad bytes is
-  not.** The image `flash` sends is the same AES-CBC + zlib container JK ships,
-  and its extracted bytes are identical (SHA-256) to an image pulled
-  independently from a vendor build -- confirmed on
-  `73-JK-PB2A16S20P-V19.02.jkbms` against `fw_PB2A16S20P_19.02.bin`. So the
-  transfer does not send the wrong data. What is unknown is whether the device
-  rejects data that is wrong for another reason: a `.jkbms` carries no signature
-  and no whole-image checksum (only metadata and a 12-byte build-time/expiry
-  trailer -- every container byte is accounted for), JK's application validates
-  only that metadata, the on-wire guard is XMODEM's 8-bit per-block checksum
-  alone, and the bootloader that would verify and commit the image could not be
-  read. A dump procedure to settle it on the bench is in the research notes;
-  it needs hardware with readout protection disabled.
+- **Host-side compatibility checks still matter.** The image `flash` sends is
+  decoded from JK's AES-CBC + zlib container, and the compatibility gate checks
+  its model and major version. `--force` waives only minor-version and expiry
+  gates. These checks reduce operator error but do not turn the bootloader into
+  an end-to-end integrity boundary.
 
-- **A garbage app should leave the bootloader intact, but reaching it again is
-  the catch.** A `.jkbms` carries only the application (`0x08004000`+); the
-  bootloader (`0x08000000–0x08003FFF`) is never in the image, so it has nothing
-  to overwrite itself with and every reason to preserve itself -- so a wrong or
-  interrupted flash is expected to leave the bootloader alive and only the app
-  broken (expected, not measured -- the bootloader could not be read). The catch
-  is re-entry: the upgrade is armed *by the application* (it writes `0x5AA5` to a
-  backup register and resets -- both the magic and the `AIRCR` reset key are in
-  the app image), so a dead app cannot re-arm the upgrade over RS485, and
-  whether the bootloader waits for a new image on its own when the app's vector
-  table is invalid is unknown. Recovery then falls to the STM32 ROM bootloader
-  (BOOT0 high, `stm32flash`): with RDP off it can rewrite the application region
-  from the extracted image and leave the JK bootloader untouched; with RDP on,
-  clearing it mass-erases the JK bootloader too and recovery needs a full image
-  no `.jkbms` contains. See `research/windows/docs/bootloader-dump-procedure.md`.
+- **An application update preserves the bootloader, but a dead application
+  cannot re-enter it over RS485.** The captured receiver writes sequentially
+  from `0x08002000`, below which the JK bootloader and persistent pages remain.
+  There is no upper bound, so an oversized transfer could still overwrite later
+  flash. Recovery from a dead app requires BOOT0 and the STM32 ROM bootloader;
+  clearing RDP mass-erases the pre-application region.
+
+- **The full-flash dumper also has one successful hardware result.** The
+  V15.41 patch was flashed to the same `JK_PB2A16S20P`; the board booted,
+  continued operating and returned a validated 128 KiB capture, including its
+  V2.0.2 bootloader and coherent persistent history. `make-dumper` still accepts
+  67 exact archived images by length and SHA-256, but the other 66 have only
+  static and simulator verification. Establish BOOT0/UART recovery and
+  independent pack protection first. Details:
+  `research/firmware/flash-dump-analysis.md`.
 
 - **The action slots have never been fired on a BMS.** The documented ones'
   addresses come from JK's register map; what each writes is inferred from the
@@ -245,15 +241,21 @@ known.
   founded as the documented ones -- and no more tested, since none of them has
   been fired at hardware either.
 
-- **Where the stored fault records live is unknown.** The board keeps them
-  (`detailLogsCount` counts them) and the datasource describes each 24-byte
-  record exactly, but the vendor application's four base getters cover frames
-  01, 02, 03 and the action space and stop: it reads the records over its
-  other channel. `0x1800` and `0x1A00` are the candidates by the same
-  +0x200-per-frame pattern. `jkctl history` reads the candidate and says
-  plainly when a board does not answer there, and `jkctl probe` sweeps both
-  read-only, so one bench run settles it. What each record's *code* means is
-  not in doubt -- `jkctl log-codes` prints the vendor's own table for it.
+- **The stored fault records are not served over Modbus.** This was an open
+  question and is now settled, from three sources that agree: the vendor's
+  RS485 register document lists no history window; the firmware's own request
+  dispatcher bounds a read to registers `0x1000`-`0x15FF` (frames 01, 02 and
+  03) and answers anything at `0x1600` or above with an error; and the vendor
+  application's own bus simulator maps only `base+0x000..0x600`. The vendor
+  reads the records over Bluetooth, on a path this interface does not expose.
+  They *are* recoverable from a full flash dump: on the audited
+  `JK_PB2A16S20P` V15.41 they sit in a three-page ring at `0x08019000` (a
+  firmware literal at `0x080094b8` points there), stored little-endian, 42
+  records to a 1 KiB page. `jkctl history --from-flash-dump full.bin` walks that
+  ring and decodes every record; `jkctl history` with no argument still makes the
+  over-the-wire attempt for a board that might differ, and says why it found
+  nothing. What each record's *code* means is not in doubt -- `jkctl log-codes`
+  prints the vendor's own table for it.
 
 - **The four one-byte temperatures are signed by inference.**
   `tmpStartHeating`, `tmpStopHeating`, `tmpBatDCHUT` and `tmpBatDCHUTPR` are

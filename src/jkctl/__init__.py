@@ -36,7 +36,7 @@ Printing, prompting and exit codes belong to :mod:`jkctl.cli` alone.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from jkctl.device import Device
 from jkctl.errors import JkError

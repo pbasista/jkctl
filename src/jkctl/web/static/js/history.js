@@ -1,50 +1,73 @@
 /* The board's own stored fault records, and what their codes mean.
  *
- * A JK board keeps a history: it counts the records in its runtime table, and
- * the datasource describes each one to the byte -- a timestamp, a code, the
- * switch positions, and a snapshot of the whole pack at the moment it
- * tripped. That snapshot is the best diagnostic either vendor application
- * offers, and it is what somebody wants at eight in the morning after a
- * battery cut out at three.
+ * A JK board keeps a history: a snapshot of the whole pack at each moment
+ * something tripped -- a timestamp, a code, the switch positions, the highest
+ * and lowest cell, the pack voltage and current, the capacity and the
+ * temperatures. That snapshot is the best diagnostic either vendor
+ * application offers, and it is what somebody wants at eight in the morning
+ * after a battery cut out at three.
  *
- * What is not settled is where the records live over Modbus. The vendor
- * application reads them over its other channel, and whether the Modbus
- * interface maps them anywhere is an open question -- so this tab reads the
- * window the pattern of the four documented frames points at, and when a
- * board does not answer there it says exactly that, which is a different
- * sentence from "your battery has no history".
+ * The records are not served over Modbus: the firmware bounds a read to
+ * frames 01-03 and keeps the records where only Bluetooth reaches them, so the
+ * over-the-wire "Read the records" button will come up empty on stock
+ * firmware and says why. The way to get them through jkctl is a full flash
+ * dump of a patched board (jkctl firmware dump-flash) -- the records live in
+ * that image, and "Load a flash dump" decodes them here in the browser.
  *
- * The code table is certain either way, and it is worth having on its own:
- * these are the vendor's own words for every event one of its boards records.
+ * The code table is worth having on its own either way: these are the
+ * vendor's own words for every event one of its boards records.
  */
 
 import { Badge, Card, DASH, Empty, fixed } from '/core/js/ui.js';
-import { html, useState } from '/core/vendor/preact-htm.module.js';
+import { html, useRef, useState } from '/core/vendor/preact-htm.module.js';
 
-export function HistoryTab({ doc, codes, busy, onRead, onCodes }) {
+export function HistoryTab({ doc, codes, busy, onRead, onDump, onCodes }) {
   const [showCodes, setShowCodes] = useState(false);
+  const fileRef = useRef(null);
+
+  const pickDump = async (event) => {
+    const chosen = event.target.files?.[0];
+    event.target.value = '';
+    if (!chosen) return;
+    await onDump(new Uint8Array(await chosen.arrayBuffer()));
+  };
 
   return html`<div class="grid">
     <${Card}
       title="Stored fault records"
       width="full"
       badge=${doc
-        ? doc.supported
+        ? doc.records.length
           ? html`<${Badge} tone="good">${doc.records.length} record(s)<//>`
-          : html`<${Badge}>not mapped here<//>`
+          : doc.source === 'dump'
+            ? html`<${Badge}>none in this dump<//>`
+            : html`<${Badge}>not over the wire<//>`
         : null}
       help=${{
         summary: 'What the board wrote down the last time something tripped.',
         body: html`Each record carries the pack as it was at that moment: the highest and
           lowest cell and their numbers, the pack voltage and current, what was left of the
-          capacity, three temperatures, and which switches were closed. Which register
-          window serves them is not documented and may not exist on your board — reading it
-          is harmless either way, and this says which answer you got.`,
+          capacity, three temperatures, and which switches were closed. This board's firmware
+          does not serve these over the serial (RS485/Modbus) link — that is a limit of the
+          firmware, not of jkctl — so to see them here, take a full flash dump of a patched
+          board with <b>jkctl firmware dump-flash</b> and load it below.`,
       }}
       foot=${html`<div class="wrap">
-        <button class="btn" disabled=${busy} onClick=${() => onRead()}>Read the records</button>
+        <button class="btn" disabled=${busy} onClick=${() => fileRef.current?.click()}>
+          Load a flash dump…
+        </button>
+        <input
+          ref=${fileRef}
+          type="file"
+          accept=".bin"
+          style="display:none"
+          onChange=${pickDump}
+        />
+        <button class="btn ghost" disabled=${busy} onClick=${() => onRead()}>
+          Try over the wire
+        </button>
         <button
-          class="btn"
+          class="btn ghost"
           disabled=${busy}
           onClick=${async () => {
             if (!codes) await onCodes();
@@ -55,12 +78,27 @@ export function HistoryTab({ doc, codes, busy, onRead, onCodes }) {
         </button>
       </div>`}
     >
+      <div class="notice">
+        <p>
+          These records are not available over the serial (RS485/Modbus) link. This board's
+          firmware does not implement reading them there, so it is a limitation of the
+          firmware, not a fault in jkctl — <b>Try over the wire</b> asks the board anyway,
+          since another board's firmware may expose them now or in a future version. The
+          vendor's mobile app reads them over <b>Bluetooth</b> instead. To read them here
+          today, take a full flash dump of a patched board (<b>jkctl firmware dump-flash</b>)
+          and <b>load the dump</b>.
+        </p>
+      </div>
       ${!doc
-        ? html`<${Empty}>Not read yet.<//>`
+        ? html`<${Empty}>No records loaded yet — load a flash dump, above.<//>`
         : !doc.supported
           ? html`<div class="notice">${doc.why}</div>`
           : !doc.records.length
-            ? html`<${Empty}>This board answered, and is holding no records.<//>`
+            ? html`<${Empty}>${
+                doc.source === 'dump'
+                  ? 'No stored records in this image — its record region is erased, or it is not a full dump of a supported board.'
+                  : 'No records came back over the wire. Stock firmware does not serve them there; load a flash dump instead.'
+              }<//>`
             : html`<div class="table-wrap tall">
                 <table>
                   <thead>

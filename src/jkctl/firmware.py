@@ -15,8 +15,9 @@ Container layout
   payload[-12:]   = int64_le build_ms || int32_le valid_hours   (trailer)
   image           = payload[:-12]                 (what is actually flashed)
 
-The image is a raw ARM Cortex-M vector-table image linked at 0x08000000.
-A fixed 6-field metadata header lives at offset 0x200 of the payload.
+The image is a raw ARM Cortex-M application image. Its link address is not
+stored explicitly in the container; all 67 audited images start at
+0x08002000. A fixed 6-field metadata header lives at image offset 0x200.
 """
 
 from __future__ import annotations
@@ -174,6 +175,99 @@ def load(path: str | Path) -> Firmware:
     )
 
 
+HDR_FIELD_SIZE = 16
+AES_BLOCK = 16
+
+
+def set_header_field(
+    image: bytes, off: int, text: str, size: int = HDR_FIELD_SIZE
+) -> bytes:
+    """Return ``image`` with the metadata field at ``off`` set to ``text``.
+
+    The 6-field metadata header lives inside the image at offset 0x200 (see
+    :data:`_FIELDS`), so updating a field -- bumping the version to clear the
+    vendor's minor-version gate, say -- is an edit of the image bytes, not of
+    the container around them.  The field is a fixed ``size``-byte NUL-padded
+    ASCII slot; ``text`` must leave room for at least one terminator.
+    """
+    raw = text.encode("ascii")
+    if len(raw) >= size:
+        raise FirmwareError(
+            f"metadata field value {text!r} is too long for its {size}-byte slot"
+        )
+    if off + size > len(image):
+        raise FirmwareError("image is too small to hold that metadata field")
+    out = bytearray(image)
+    out[off : off + size] = raw + b"\0" * (size - len(raw))
+    return bytes(out)
+
+
+def build(image: bytes, *, build_ms: int = 0, valid_hours: int = 0) -> bytes:
+    """Encode ``image`` into a ``.jkbms`` container -- the inverse of :func:`load`.
+
+    Produces a file JK's application (and :func:`load`) accepts:
+
+        payload = image || int64_le build_ms || int32_le valid_hours
+        blob    = uint32_le len(payload) || zlib_deflate(payload)
+        file    = AES-256-CBC(KEY, iv=0, PKCS#7(blob))
+
+    The 6-field metadata header the app reads (model, version, ...) is part of
+    ``image`` at offset 0x200, so it is carried through as-is; use
+    :func:`set_header_field` or :func:`repack` to change it first.
+
+    This is not byte-identical to JK's own file -- zlib's output depends on the
+    encoder -- but it round-trips exactly: ``load(build(fw.image, ...))``
+    reproduces the same image and metadata.  ``valid_hours <= 0`` means no
+    expiry, which is what an unmodified research build should carry.
+    """
+    if len(image) < DEVICE_CODE_OFF + 4:
+        raise FirmwareError(
+            f"image is too small to carry a metadata header ({len(image)} bytes)"
+        )
+    payload = image + struct.pack("<qi", int(build_ms), int(valid_hours))
+    if len(payload) > MAX_RAW:
+        raise FirmwareError(f"payload is too large ({len(payload)} > {MAX_RAW})")
+    blob = struct.pack("<I", len(payload)) + zlib.compress(payload, 9)
+    padlen = AES_BLOCK - (len(blob) % AES_BLOCK)  # PKCS#7 (a full block if aligned)
+    blob += bytes([padlen]) * padlen
+    data = aes.encrypt_cbc(KEY, b"\0" * 16, blob)
+    if len(data) > MAX_ENCRYPTED:
+        raise FirmwareError(
+            f"encrypted file is too large ({len(data)} > {MAX_ENCRYPTED})"
+        )
+    return data
+
+
+def repack(
+    fw: Firmware,
+    *,
+    image: bytes | None = None,
+    version: str | None = None,
+    model: str | None = None,
+    build_ms: int | None = None,
+    valid_hours: int | None = None,
+) -> bytes:
+    """Re-emit ``fw`` as a ``.jkbms``, optionally with a new image or metadata.
+
+    The metadata that is not overridden is taken from ``fw``.  ``version`` must
+    be the ``major.minor`` form the app parses; bumping the minor above the
+    device's is how a repacked image clears the vendor's "must be newer" gate.
+    """
+    img = fw.image if image is None else image
+    if version is not None:
+        parts = version.split(".")
+        if len(parts) != VERSION_PARTS or not all(p.isdigit() for p in parts):
+            raise FirmwareError(f"version must be major.minor, got {version!r}")
+        img = set_header_field(img, _FIELDS["version"], version)
+    if model is not None:
+        img = set_header_field(img, _FIELDS["model"], model)
+    return build(
+        img,
+        build_ms=fw.build_ms if build_ms is None else build_ms,
+        valid_hours=fw.valid_hours if valid_hours is None else valid_hours,
+    )
+
+
 @dataclass(frozen=True)
 class Check:
     """One step of the vendor's compatibility gate, and how it went."""
@@ -217,22 +311,17 @@ def gate(
     now_ms = int(time.time() * 1000) if now_ms is None else now_ms
 
     if fw.valid_hours <= 0:
-        checks.append(
-            Check(
-                "not time-limited", True, "the build carries no expiry", kind="expiry"
-            )
-        )
+        checks.append(Check("expiry", True, "not a time-limited build", kind="expiry"))
     else:
         end = fw.build_ms + fw.valid_hours * 3600_000
         inside = fw.build_ms - 7200_000 <= now_ms <= end
         checks.append(
             Check(
-                "inside its validity window",
+                "expiry",
                 inside,
-                "still valid"
+                "within its validity window"
                 if inside
-                else "Binary file is invalid (time-limited build outside its "
-                "validity window)",
+                else "this is a time-limited build and is past its validity window",
                 waived=force and not inside,
                 kind="expiry",
             )
@@ -242,12 +331,11 @@ def gate(
     readable = len(parts) == VERSION_PARTS and all(p.isdigit() for p in parts)
     checks.append(
         Check(
-            "the unit reports a version",
+            "device version",
             readable,
-            dev_version
+            f"the unit is at version {dev_version}"
             if readable
-            else "Device Identify is not same to connected device! "
-            f"(unparsable device version {dev_version!r})",
+            else f"the unit's version could not be read (got {dev_version!r})",
         )
     )
     if not readable:
@@ -257,35 +345,34 @@ def gate(
     same_major = fw.major == dev_major
     checks.append(
         Check(
-            "major version matches",
+            "major version",
             same_major,
-            f"both {fw.major}"
+            f"the file and the unit are both major version {fw.major}"
             if same_major
-            else "Major version is not same to connected device! "
-            f"(firmware {fw.major}, device {dev_major})",
+            else f"the file is for major version {fw.major}, "
+            f"but this unit is major version {dev_major}",
         )
     )
     newer = dev_minor < fw.minor
     checks.append(
         Check(
-            "minor version is newer",
+            "minor version",
             newer,
-            f"{dev_minor} -> {fw.minor}"
+            f"the file (minor {fw.minor}) is newer than the unit (minor {dev_minor})"
             if newer
-            else "Minor version must be larger than connected device! "
-            f"(firmware {fw.minor}, device {dev_minor})",
+            else f"the file's minor version ({fw.minor}) is not higher than "
+            f"the unit's ({dev_minor}); flashing requires a higher minor version",
             waived=force and not newer,
         )
     )
     same_model = fw.model == dev_model
     checks.append(
         Check(
-            "model matches",
+            "model",
             same_model,
-            fw.model
+            f"the file and the unit are both {fw.model}"
             if same_model
-            else "Device Identify is not same to connected device! "
-            f"(firmware {fw.model!r}, device {dev_model!r})",
+            else f"the file is for model {fw.model!r}, but this unit is {dev_model!r}",
         )
     )
     return checks

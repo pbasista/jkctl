@@ -8,10 +8,13 @@ other action registers, sets the port protocols and dry contacts, and
 validates and flashes a `.jkbms` firmware file the way JK's own Windows
 application does.
 
+[![The jkctl dashboard: one pack's state of charge and power, its per-cell voltages against their protection band, temperatures, board identity, the running history, the three main switches, raised protections and the health check](https://raw.githubusercontent.com/pbasista/jkctl/main/docs/img/dashboard.png)](https://github.com/pbasista/jkctl/blob/main/docs/web-ui.md)
+
 **It is a web interface first.** `jkctl`, with nothing after it, serves a
-page on this machine and opens a browser on it — that is the default mode of
-operation and how most people will use it. Everything the page does is also
-a command you can type, for a script or a terminal.
+page on this machine and opens a browser on it; the dashboard above is one
+pack of a bank on that page. That is the default mode of operation and how
+most people will use it. Everything the page does is also a command you can
+type, for a script or a terminal.
 
 Everything here was derived from JK BMS Monitor 3.11.0, the encrypted protocol
 datasource shipped with it, and JK's own RS485 Modbus register-map documents.
@@ -43,8 +46,6 @@ all sixteen addresses of whichever you choose, and shows you the bank — every
 board on the bus, one tile each. Options for it can be given straight after
 the bare name (`jkctl --port /dev/ttyUSB1`, `jkctl --listen 0.0.0.0:8087
 --read-only`). See [docs/web-ui.md](docs/web-ui.md).
-
-[![The jkctl dashboard: pack state and charge, per-cell voltages against their protection band, board identity, temperatures, the running history, the three main switches, raised protections and the health check](https://raw.githubusercontent.com/pbasista/jkctl/main/docs/img/dashboard.png)](https://github.com/pbasista/jkctl/blob/main/docs/web-ui.md)
 
 To see the whole interface without a battery anywhere near it:
 
@@ -91,6 +92,7 @@ writes a report you can read or send on. It never writes a register.
 | `jkctl protocols list\|show\|set` | which protocol each UART and the CAN port speaks |
 | `jkctl dry-contact show\|set` | the two dry contacts and the LCD buzzer |
 | `jkctl firmware info\|check\|list\|flash` | a `.jkbms` file or a directory of them: read, check, flash |
+| `jkctl firmware make-dumper\|dump-flash` | exact-image-locked full-flash recovery |
 | `jkctl probe` | characterise a bus that is not answering |
 | `jkctl simulate` | serve a fake BMS on a serial port, for testing |
 | `jkctl doctor` | read a unit over and report what looks wrong |
@@ -189,27 +191,28 @@ Then `jkctl status --device shed`.
   bootloader (BOOT0 high, a USB-TTL adapter, `stm32flash`): if the MCU's readout
   protection (RDP) is off it can rewrite the application region from the image
   `jkctl` extracts, leaving the JK bootloader untouched. If RDP is on, clearing
-  it mass-erases the JK bootloader too, and recovery then needs a full image --
-  including the `0x08000000–0x08003FFF` bootloader that ships in no `.jkbms`.
-  See `research/windows/docs/bootloader-dump-procedure.md`.
-- **The image sent is the vendor's own, to the byte; the BMS is not known to
-  check it.** `jkctl` decodes a `.jkbms` exactly as JK's application does, and
-  the bytes it extracts match an independently pulled vendor image to the
-  SHA-256 -- so the risk is not that it sends the wrong bytes. But a `.jkbms`
-  carries no signature and no whole-image checksum, JK's application validates
-  only the metadata (model, version, expiry) and never the image itself, and on
-  the wire the only guard is XMODEM's weak 8-bit per-block checksum. Whether the
-  bootloader verifies the image before running it is unknown: it ships in no
-  firmware file and could not be read. Assume a wrong or corrupt image can be
-  written and run.
+  it mass-erases the JK bootloader too, and recovery then needs a full image.
+  All 67 archived applications across HW V14, V15, V17 and V19 are linked at
+  `0x08002000`; `firmware make-dumper` and `dump-flash` implement an
+  exact-image-locked route to capture the whole device before it is needed.
+  See `research/firmware/flash-dump-analysis.md`.
+- **The captured bootloader does not provide end-to-end image integrity.**
+  `jkctl` decodes a `.jkbms` exactly as JK's application does and checks its
+  metadata before transfer. The bootloader recovered from one PB2A16S20P checks
+  XMODEM's block number/complement and 8-bit checksum, but not a signature,
+  whole-image checksum, model, version, expected length or destination bound.
+  Assume a wrong, corrupt, truncated or oversized image can be written and may
+  run. `make-dumper` is modified firmware and therefore adds further risk.
 - The web interface is bound to `127.0.0.1` and needs no token. Off loopback
   it generates one, refuses a `Host` header that is a name it was not told to
   expect, and requires a header on every write that a cross-origin form
   cannot set. `--read-only` refuses every write server-side, so a page can be
   shared without handing over the battery.
-- No write path has yet been exercised against real hardware -- from the
-  browser or from the terminal. See `docs/reference.md` for the full list of
-  what has and has not been proven.
+- The firmware transfer and full-flash dumper have each succeeded on one
+  physical `JK_PB2A16S20P` running official V15.41: the dumper image booted,
+  the board continued operating, and `dump-flash` returned a validated 128 KiB
+  capture. This is one data point, not evidence for other models, hardware
+  revisions, firmware versions or write commands. See `docs/reference.md`.
 
 ## AES backends
 

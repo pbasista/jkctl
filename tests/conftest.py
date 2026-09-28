@@ -178,8 +178,12 @@ def cli_bank(monkeypatch, catalog):
     import sys
 
     main_module = sys.modules["jkctl.cli.main"]
+    target_module = sys.modules["jkctl.cli.target"]
     monkeypatch.setattr(main_module, "open_bus", _open_bus)
     monkeypatch.setattr(main_module, "open_device", _open_device)
+    # `history` opens its own bus through the target module, so stub it there too.
+    monkeypatch.setattr(target_module, "open_bus", _open_bus)
+    monkeypatch.setattr(target_module, "open_device", _open_device)
     monkeypatch.setattr(type(bus), "close", lambda self: None)
     return bus, sims
 
@@ -216,8 +220,12 @@ def cli_device(monkeypatch, pair, catalog):
     import sys
 
     main_module = sys.modules["jkctl.cli.main"]
+    target_module = sys.modules["jkctl.cli.target"]
     monkeypatch.setattr(main_module, "open_bus", _open_bus)
     monkeypatch.setattr(main_module, "open_device", _open_device)
+    # `history` opens its own bus through the target module, so stub it there too.
+    monkeypatch.setattr(target_module, "open_bus", _open_bus)
+    monkeypatch.setattr(target_module, "open_device", _open_device)
     # The bus must survive the `with` block main() puts it in, because one
     # test may run several commands against the same simulated unit.
     monkeypatch.setattr(type(bus), "close", lambda self: None)

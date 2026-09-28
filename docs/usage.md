@@ -217,16 +217,27 @@ A JK board keeps its own history of what tripped, and each record is a
 snapshot of the whole pack at that moment.
 
 ```sh
-jkctl log-codes                # what every record code means; no hardware
-jkctl history                  # the records, if this board maps them
+jkctl log-codes                     # what every record code means; no hardware
+jkctl history --dump full.bin       # the records, out of a full flash dump
+jkctl history                       # the over-the-wire attempt (see below)
 ```
 
 `log-codes` is JK's own table, extracted from its application: 137 events,
-including the per-cell protections. `history` is a different matter -- which
-register window serves the records over Modbus is not documented and may not
-exist on your board, so the command reads the likely one and says plainly
-when nothing answers there. `jkctl probe` sweeps both candidates read-only,
-which is what would settle it.
+including the per-cell protections.
+
+The records are **not served over Modbus**. This was an open question and is
+now settled: the firmware bounds a read to frames 01-03 (registers
+`0x1000`-`0x15FF`) and answers anything above with an error, the vendor's RS485
+document lists no history window, and the vendor reads the records over
+Bluetooth instead. So `jkctl history` with no argument -- the over-the-wire
+attempt, kept for a board that might differ -- comes up empty on stock firmware
+and says why.
+
+The way to get them is a full flash dump. On a board flashed with the dumper
+(`jkctl firmware dump-flash`, above), the records sit in the captured image; on
+the audited `JK_PB2A16S20P` V15.41 they are a three-page ring at `0x08019000`,
+stored little-endian. `jkctl history --from-flash-dump full.bin` walks that ring
+and prints every record, newest first, and needs no hardware.
 
 ## Firmware
 
@@ -235,7 +246,19 @@ jkctl firmware info fw.jkbms                    # no hardware needed
 jkctl firmware check fw.jkbms                   # against the connected unit
 jkctl firmware list ~/jk-firmware               # a whole directory, judged
 jkctl firmware flash fw.jkbms
+jkctl firmware repack fw.jkbms -o out.jkbms --set-version 15.99
+jkctl firmware make-dumper stock.jkbms -o dumper.jkbms
+jkctl firmware dump-flash -o full.bin --bootloader-out pre-app-8k.bin
 ```
+
+`repack` is the inverse of `info`: it re-encodes a `.jkbms` (the same
+AES-CBC + zlib container JK ships), optionally swapping in a patched image
+(`--image raw.bin`) or editing the in-image metadata header (`--set-version`,
+`--set-model`, `--valid-hours`, `--build-ms`). The output decodes to the same
+image and metadata it was given, but is not byte-identical to a vendor build
+(zlib's output differs). Bumping the minor version is how a repacked image
+clears the "must be newer" gate on a unit already at that version. A repacked
+file is not signed by JK; flash one only onto a device you own.
 
 `check` shows every step of the gate rather than the first refusal, so a file
 turned down on its version does not leave you wondering whether the model
@@ -250,9 +273,30 @@ minor-version and expiry checks only -- model and major version are never
 waived.
 
 `flash` runs the same gate, asks for a typed `yes`, arms the bootloader and
-sends the image, showing a progress bar. **This has never been run against a
-real BMS.** Read the safety notes in the README and in
+sends the image, showing a progress bar. Once the unit reboots into the new
+application it re-syncs the clock to this host's local time: a reboot can leave
+the board's real-time clock at the firmware's default, and the board keeps no
+time zone, so without this a flash could leave the clock a whole zone offset
+out. If the unit does not answer in time, run `jkctl time sync` once it is
+back. This exact path has succeeded on repeated flashes of official V15.41 to a
+`JK_PB2A16S20P`. That does not establish support for other models, hardware
+revisions or firmware versions. Read the safety notes in the README and in
 `docs/reference.md` first.
+
+`make-dumper` is narrower than `repack`: it accepts only the 67 exact archived
+vendor images (length and SHA-256) across HW V14, V15, V17 and V19, adds a
+cooperative 256-byte-per-request read path, and preserves the source
+model/version. The V15.41 dumper has been flashed to one `JK_PB2A16S20P`; that
+board booted, continued operating and returned a validated 128 KiB capture.
+No other target/image pair has been proven on hardware.
+
+Flash its output with `--force` only after arranging BOOT0/UART recovery.
+`dump-flash` CRC-checks every block and is restricted to an audited
+model/version pair. Run it twice and require identical SHA-256 values before
+relying on a new capture. `--bootloader-out` writes the 8 KiB below the
+application, including persistent pages. Preserve `full.bin` for whole-chip
+recovery. The exact patch, captured layout and bench procedure are in
+`research/firmware/flash-dump-analysis.md`.
 
 ## Testing without hardware
 

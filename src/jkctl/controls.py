@@ -138,6 +138,33 @@ def sync_clock(device: Device, when: datetime | None = None) -> datetime:
     return when
 
 
+def resync_clock_after_flash(
+    device: Device, *, attempts: int = 15, delay: float = 1.0
+) -> datetime | None:
+    """After a flash, wait for the reboot and set the clock to local time.
+
+    A freshly flashed board reboots into the new application and is silent on
+    the bus for a few seconds, and the reboot can leave its real-time clock at
+    the firmware's own power-on default.  The board keeps no time zone and
+    counts from local midnight (see :func:`jkctl.identity.rtc_epoch`), so a
+    clock left at that default can sit a whole zone offset -- hours -- away from
+    local time.  This retries a normal clock sync until the unit answers, so a
+    flash does not leave the clock desynchronised.
+
+    Returns the timestamp written, or ``None`` if the unit did not answer within
+    ``attempts`` tries.  It never raises: a clock that could not be set is a
+    hint to run ``jkctl time sync`` by hand, not a failed flash.
+    """
+    import time
+
+    for _ in range(max(1, attempts)):
+        try:
+            return sync_clock(device)
+        except JkError:
+            time.sleep(delay)
+    return None
+
+
 def read_clock(device: Device) -> datetime | None:
     """Read the device's real-time clock, or None if this board has no RTC field."""
     return identity.rtc_to_datetime(
@@ -194,6 +221,7 @@ __all__ = [
     "preset",
     "preset_values",
     "read_clock",
+    "resync_clock_after_flash",
     "shutdown",
     "sync_clock",
     "toggle",

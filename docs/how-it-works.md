@@ -93,9 +93,9 @@ reopened, so it is learned once per session rather than once per minute.
     image         = payload[:-12]                 the bytes actually flashed
 
 The key is a 32-byte ASCII string in the application's `.rdata`, handed to its
-`J::Aes` constructor. Verified against all 63 firmware files on hand, with no
-failures. The image is a raw ARM Cortex-M vector-table image linked at
-0x08004000; the bootloader below it is in no firmware file.
+`J::Aes` constructor. Verified against all 67 firmware files on hand, with no
+failures. Every audited image is linked at `0x08002000`; the 8 KiB below it is
+absent from every `.jkbms`.
 
 A fixed metadata header sits at payload offset 0x200: six 16-byte NUL-padded
 ASCII fields -- software version, build date, build time, model -- followed by
@@ -121,9 +121,38 @@ CRC: `SOH | block | ~block | data[128] | checksum`, blocks numbered from 1,
 the last padded with 0xFF, `EOT EOT EOT` appended to the final write. The
 sender scans received bytes *backwards* for the first ACK, NAK or CAN.
 
-The receiving half is the bootloader, so none of this could be checked against
-the device side. `jkctl simulate` implements the receiver the sender expects,
-which is how the transfer is tested.
+The receiver was recovered from the V2.0.2 bootloader of one PB2A16S20P. It
+matches this packet format, checks only the block number/complement and additive
+checksum, writes sequentially from `0x08002000` without an upper bound, and
+accepts EOT without an expected-length check. This transfer succeeded with
+official V15.41 on that device; other bootloaders remain unverified.
+
+## The exact-image full-flash dump
+
+The 67 audited images span HW V14, V15, V17 and V19 and contain 98 to 115
+Modbus write descriptors. The dump patch relocates each image's own table
+unchanged, adds action register `0x162e`, and hooks its common dispatcher. Each
+action returns one 256-byte flash block in the stock 300-byte response buffer,
+then returns to the stock task; there is no autonomous stream or interrupt
+masking. Frames carry their absolute address, reported flash size, block
+number, CRC32 and JK sum8.
+
+The patcher is locked to each exact vendor image SHA-256 and stores all 33
+observed binary layouts explicitly. V14/V15 response objects hold their buffer
+at offset 4 and length at offset 0; B-Series/V19 use offsets 8 and 2. The
+corrected link base comes from the parser's absolute descriptor-table pointer,
+and is independently consistent with the reset stub. The application itself
+writes persistent pages at `0x08001800` and `0x08001c00`, below the
+application, so the host saves both the full flash and an optional 8 KiB
+pre-application carve. See
+`research/firmware/flash-dump-analysis.md` for patch addresses and
+the real-device procedure.
+
+The V15.41 patch has also run on that PB2A16S20P. The board booted and continued
+operating, and the host recovered a validated 128 KiB image whose application
+region exactly matches the generated dumper. This proves one target/image
+combination only; the other 66 allowlisted images remain statically and
+simulator verified, not hardware verified.
 
 ## Reading a table without asking sixty-eight times
 
@@ -154,12 +183,14 @@ to, so the layout checks itself.
 What each record's code *means* was recovered whole: the vendor application
 builds a map from code to display string, one `tr()` per entry, ending in two
 32-iteration loops that name the per-cell protections. 137 events, shipped as
-`logcodes.json`. Where the records live over Modbus was not: the
-application's four base getters cover frames 01, 02, 03 and the action space
-and stop, and it reads the records over its other channel. `jkctl history`
-reads the candidate window the +0x200-per-frame pattern points at and says
-plainly when a board does not answer there; `jkctl probe` sweeps it
-read-only, so one bench run settles it.
+`logcodes.json`. The records are **not served over Modbus**: the firmware
+bounds a read to frames 01-03 (registers `0x1000`-`0x15FF`) and refuses
+anything above, the vendor's four base getters stop there too, and the vendor
+reads the records over Bluetooth instead. They are recoverable from a full
+flash dump, where they sit little-endian in a three-page ring (at `0x08019000`
+on the audited V15.41), so `jkctl history --from-flash-dump full.bin` decodes
+them with no hardware; `jkctl history` with no argument still tries the wire, for a board
+that might differ, and says why it found nothing.
 
 ## AES with nothing to install
 
@@ -179,5 +210,5 @@ a register-compatible clone: RCC at 0x40021000, FLASH at 0x40022000, GPIOA at
 bytes. Its ROM bootloader is UART-only, so the widely repeated "it enumerates
 as a USB STM32 bootloader" story does not apply to this chip -- and JK's own
 0x5AA5 path enters JK's bootloader, which is a different thing again.
-`research/windows/docs/bootloader-dump-procedure.md` has the bench procedure,
-and the one mass-erase trap to avoid, if anyone wants to read it out.
+`research/firmware/bootloader-dump-procedure.md` has the bench
+procedure and the one mass-erase trap to avoid, if anyone wants to read it out.

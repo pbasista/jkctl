@@ -296,7 +296,7 @@ def test_the_gate_comes_back_as_a_checklist(ctx, monkeypatch):
     assert doc["firmware"]["model"] == "JK_PB2A16S20P"
     assert doc["compatible"] is True
     names = [c["name"] for c in doc["checks"]]
-    assert "major version matches" in names and "model matches" in names
+    assert "major version" in names and "model" in names
 
 
 def test_a_file_for_another_board_is_refused_with_every_step_shown(ctx, monkeypatch):
@@ -306,7 +306,7 @@ def test_a_file_for_another_board_is_refused_with_every_step_shown(ctx, monkeypa
     assert doc["compatible"] is False
     assert doc["forcible"] is False  # --force never waives the model
     blocking = [c["name"] for c in doc["checks"] if c["blocking"]]
-    assert blocking == ["model matches"]
+    assert blocking == ["model"]
 
 
 def test_flashing_delivers_the_image_and_reports_progress(ctx, monkeypatch):
@@ -325,16 +325,54 @@ def test_flashing_delivers_the_image_and_reports_progress(ctx, monkeypatch):
     assert held.state == "done", held.error
     # The simulator's XMODEM receiver reassembled what the sender sent.
     assert ctx.fake.sim(1).received
+    # And the flash re-synced the clock, so a reboot does not leave it a
+    # time-zone offset out: the RTC-calibration action (slot 0x12) fired.
+    assert any(slot == 0x12 for slot, _ in ctx.fake.sim(1).actions)
 
 
 # --- the stored records --------------------------------------------------------------
 
 
-def test_history_says_a_board_does_not_map_it_rather_than_failing(ctx):
+def test_history_over_the_wire_says_it_is_not_served_rather_than_failing(ctx):
     doc = call(ctx, "GET", "/api/history", id=1)
     assert doc["supported"] is False
-    assert "does not answer at register" in doc["why"]
+    assert "does not serve the stored records over Modbus" in doc["why"]
+    assert "--from-flash-dump" in doc["why"]  # points at the way that works
     assert doc["records"] == []
+
+
+def test_history_from_a_flash_dump_decodes_the_records(ctx):
+    import struct
+
+    from jkctl import history as H
+
+    values = {
+        "rtc": 200_000,
+        "code": 7,
+        "switches": 0b0011,
+        "max_no": 5,
+        "min_no": 2,
+        "cell_max": 3450,
+        "cell_min": 3120,
+        "pack_v": 5327,
+        "pack_a": 265,
+        "remaining": 2968,
+        "full": 3120,
+        "max_temp": 24,
+        "min_temp": -7,
+        "mos_temp": 31,
+        "heat": 15,
+    }
+    image = bytearray(b"\xff" * 0x20000)
+    off = H.STORAGE_BASE - H.FLASH_BASE
+    image[off : off + H.RECORD_BYTES] = struct.pack(
+        H.STORED_RECORD_FORMAT, *values.values()
+    )
+    doc = upload(ctx, "/api/history/dump", bytes(image))
+    assert doc["source"] == "dump"
+    assert len(doc["records"]) == 1
+    assert doc["records"][0]["name"] == "Remote close charge"  # code 7
+    assert doc["records"][0]["packV"] == 53.27
 
 
 def test_the_log_code_table_is_served(ctx):

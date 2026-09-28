@@ -268,6 +268,51 @@ input.num {
  * alfenctl draws the same view of the chargers it can see.  What is a
  * battery's own is the charge bar. */
 
+/* A tile names its board in the same two-line shape the header and the board
+ * picker use (`Lines`): the serial number on top -- the one string no two
+ * units share, and what a board is named by everywhere else -- and under it
+ * the nameplate, model with hardware revision and firmware version, the three
+ * facts that decide what a register means and whether it can be written.  A
+ * bank is rarely one part number bought at one moment, so which of the
+ * matching-but-not-identical units this is belongs on the tile rather than
+ * behind a click.  `.lines .secondary` already dims and sizes the nameplate.
+ *
+ * The Modbus address rides at the end of the serial line, lighter, because it
+ * is not the name but the handle: it is in the URL, it is what `--id` takes,
+ * and it is what the DIP switches on the board are set to, so which address a
+ * serial sits at is worth saying without competing with the serial for the
+ * eye.  It is also a size smaller than the serial and set off by a gap wide
+ * enough that it reads as a marker beside the name rather than a tail of it --
+ * "BMS 1" is not part of the serial, it says where that serial answers.
+ *
+ * And it is italic, so it is plainly a different kind of thing from the model,
+ * hardware and firmware on the line below -- which is dim and the same size, so
+ * without the slant the address would read as more of that caption rather than
+ * as an annotation on the name.  A slant does this in both themes with no new
+ * colour to keep legible against two backgrounds. */
+.tile-head .addr {
+  margin-left: 0.5em;
+  font-size: var(--fs-sm);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* The activity badges -- charging, discharging, balancing and, on a cold
+ * pack, heating.  Packed tighter than a badge elsewhere so the three a
+ * balancing pack shows sit on one line in a 280px tile instead of spilling
+ * the balancer onto a row of its own.  A fourth still wraps, and that is
+ * fine: the tile grows downward and its heading does not move (see `.tile`
+ * in core.css). */
+.tile .wrap {
+  gap: 6px;
+}
+
+.tile .wrap .badge {
+  padding: 2px 6px;
+  letter-spacing: 0.02em;
+}
+
 .soc-bar {
   height: 7px;
   border-radius: 4px;
@@ -395,6 +440,23 @@ input.num {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+/* A paragraph is one flex child, so its inline emphasis flows as prose rather
+ * than each run becoming its own column; it carries no margin of its own. */
+.notice p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* A notice that carries more than one line -- a lead sentence and a caveat --
+ * stacks them.  The base `.notice` is a flex row, which lays two paragraphs
+ * out as two side-by-side columns; that reads as a wall split down the middle,
+ * so a multi-line notice asks for `stack`. */
+.notice.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .notice.error {

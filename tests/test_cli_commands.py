@@ -51,14 +51,14 @@ def test_status_json_carries_full_resolution(cli_device, capsys):
 def test_cells_lists_every_present_cell(cli_device, capsys):
     assert run("cells") == cli.EXIT_OK
     out = capsys.readouterr().out
-    assert "16 cells" in out and "3.300" in out and "3.315" in out
+    assert "16 cells" in out and "3.304" in out and "3.293" in out
 
 
 def test_cells_json(cli_device, capsys):
     assert run("cells", "--json") == cli.EXIT_OK
     doc = json.loads(capsys.readouterr().out)
     assert len(doc["cells"]) == 16
-    assert doc["cells"][0]["voltage_v"] == 3.3
+    assert doc["cells"][0]["voltage_v"] == 3.301
 
 
 def test_alarms_says_so_when_there_are_none(cli_device, capsys):
@@ -307,7 +307,7 @@ def test_firmware_check_refuses_an_older_image(
     path.write_bytes(b"\x00" * len(blob))
     monkeypatch.setattr(F.aes, "decrypt_cbc", lambda key, iv, data: blob)
     assert run("firmware", "check", str(path)) == cli.EXIT_INCOMPATIBLE
-    assert "Minor version" in capsys.readouterr().err
+    assert "minor version" in capsys.readouterr().err
 
 
 def test_firmware_flash_delivers_the_image(
@@ -325,7 +325,12 @@ def test_firmware_flash_delivers_the_image(
     assert run("firmware", "flash", str(path), "-y") == cli.EXIT_OK
     image = payload[: -F.TRAILER]
     assert bytes(sim.received) == image + b"\xff" * (-len(image) % 128)
-    assert "Upload firmware successfully" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Upload firmware successfully" in out
+    # The flash re-syncs the clock so a reboot cannot leave it a time-zone
+    # offset out; the RTC-calibration action (slot 0x12) is written last.
+    assert "clock set to" in out
+    assert sim.actions and sim.actions[-1][0] == 0x12
 
 
 # --- the register browser -----------------------------------------------------------
@@ -483,9 +488,50 @@ def test_log_codes_needs_no_hardware(capsys):
     assert "Reset Watch-Dog" in out and "Cell 32 over discharge protection" in out
 
 
-def test_history_says_when_a_board_does_not_map_it(cli_device, capsys):
+def test_history_says_when_a_board_does_not_serve_them(cli_device, capsys):
     assert run("history") == cli.EXIT_ERROR
-    assert "does not answer at register" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "does not serve the stored records over Modbus" in err
+    assert "--from-flash-dump" in err  # points at the way that works
+
+
+def test_history_from_a_flash_dump_decodes_the_records(tmp_path, capsys):
+    from jkctl import history as H
+
+    record = struct_pack_stored(code=7, rtc=123_456)
+    image = bytearray(b"\xff" * 0x20000)
+    off = H.STORAGE_BASE - H.FLASH_BASE
+    image[off : off + H.RECORD_BYTES] = record
+    dump = tmp_path / "full.bin"
+    dump.write_bytes(bytes(image))
+    assert run("history", "--from-flash-dump", str(dump)) == cli.EXIT_OK
+    assert "Remote close charge" in capsys.readouterr().out  # code 7
+
+
+def struct_pack_stored(**over):
+    import struct
+
+    from jkctl import history as H
+
+    values = {
+        "rtc": 100_000,
+        "code": 29,
+        "switches": 0b0011,
+        "max_no": 5,
+        "min_no": 2,
+        "cell_max": 3450,
+        "cell_min": 3120,
+        "pack_v": 5327,
+        "pack_a": 265,
+        "remaining": 2968,
+        "full": 3120,
+        "max_temp": 24,
+        "min_temp": -7,
+        "mos_temp": 31,
+        "heat": 15,
+    }
+    values.update(over)
+    return struct.pack(H.STORED_RECORD_FORMAT, *values.values())
 
 
 def test_the_board_actions_ask_and_fire_their_slots(cli_device, sim, monkeypatch):

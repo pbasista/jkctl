@@ -171,6 +171,68 @@ def _pure_decrypt_cbc(key: bytes, iv: bytes, data: bytes) -> bytes:
     return bytes(out)
 
 
+# The forward cipher, the mirror of the four inverse steps above.  Repacking a
+# .jkbms (jkctl.firmware.build) is the one operation that encrypts; like the
+# decrypt path it is used at most once per file, so pure Python is fast enough
+# and keeps the "nothing to install" promise on hosts with no crypto library.
+
+
+def _shift_rows(s: list[int]) -> None:
+    """Rotate row r left by r bytes (inverse of _inv_shift_rows)."""
+    for r in range(1, 4):
+        row = [s[r + 4 * c] for c in range(4)]
+        row = row[r:] + row[:r]
+        for c in range(4):
+            s[r + 4 * c] = row[c]
+
+
+def _sub_bytes(s: list[int]) -> None:
+    """Substitute every byte through the S-box."""
+    for i in range(16):
+        s[i] = _SBOX[s[i]]
+
+
+def _mix_columns(s: list[int]) -> None:
+    """Multiply each column by the MDS matrix, over GF(2^8)."""
+    for c in range(4):
+        a = [s[4 * c + r] for r in range(4)]
+        s[4 * c + 0] = _mul(a[0], 2) ^ _mul(a[1], 3) ^ a[2] ^ a[3]
+        s[4 * c + 1] = a[0] ^ _mul(a[1], 2) ^ _mul(a[2], 3) ^ a[3]
+        s[4 * c + 2] = a[0] ^ a[1] ^ _mul(a[2], 2) ^ _mul(a[3], 3)
+        s[4 * c + 3] = _mul(a[0], 3) ^ a[1] ^ a[2] ^ _mul(a[3], 2)
+
+
+def _encrypt_block(block: bytes, w: list[list[int]]) -> bytes:
+    """Run the AES-256 forward cipher over one 16-byte block."""
+    nr = 14  # rounds, for a 256-bit key
+    s = list(block)
+    _add_round_key(s, w, 0)
+    for rnd in range(1, nr):
+        _sub_bytes(s)
+        _shift_rows(s)
+        _mix_columns(s)
+        _add_round_key(s, w, rnd)
+    # The final round is the same without MixColumns.
+    _sub_bytes(s)
+    _shift_rows(s)
+    _add_round_key(s, w, nr)
+    return bytes(s)
+
+
+def _pure_encrypt_cbc(key: bytes, iv: bytes, data: bytes) -> bytes:
+    if len(data) % 16:
+        raise ValueError("plaintext not a multiple of 16 bytes")
+    w = _expand_key(key)
+    out = bytearray()
+    prev = iv
+    for i in range(0, len(data), 16):
+        block = bytes(a ^ b for a, b in zip(data[i : i + 16], prev))
+        enc = _encrypt_block(block, w)
+        out += enc
+        prev = enc
+    return bytes(out)
+
+
 # --------------------------------------------------------------------------- #
 #  Backend selection                                                           #
 # --------------------------------------------------------------------------- #
@@ -337,6 +399,114 @@ def decrypt_cbc(key: bytes, iv: bytes, data: bytes) -> bytes:
     raise RuntimeError("no AES backend succeeded: %r" % last)
 
 
+# --------------------------------------------------------------------------- #
+#  Encrypt path -- the mirror of the above, for repacking a .jkbms             #
+# --------------------------------------------------------------------------- #
+
+
+def _try_crypto_enc(key, iv, data):
+    from Crypto.Cipher import AES  # ty: ignore[unresolved-import]
+
+    return AES.new(key, AES.MODE_CBC, iv).encrypt(data)
+
+
+def _try_cryptography_enc(key, iv, data):
+    from cryptography.hazmat.primitives.ciphers import (  # ty: ignore[unresolved-import]
+        Cipher,
+        algorithms,
+        modes,
+    )
+
+    enc = Cipher(algorithms.AES(key), modes.CBC(iv)).encryptor()
+    return enc.update(data) + enc.finalize()
+
+
+def _try_openssl_enc(key, iv, data):
+    import ctypes as c
+
+    lib = _load_libcrypto()
+    if lib is None:
+        raise ImportError("libcrypto not available")
+    if len(key) != KEY_BYTES:
+        raise ValueError("AES-256 needs a 32-byte key, got %d" % len(key))
+    if len(data) % 16:
+        raise ValueError("plaintext not a multiple of 16 bytes")
+
+    lib.EVP_CIPHER_CTX_new.restype = c.c_void_p
+    lib.EVP_aes_256_cbc.restype = c.c_void_p
+    lib.EVP_EncryptInit_ex.argtypes = [
+        c.c_void_p,
+        c.c_void_p,
+        c.c_void_p,
+        c.c_char_p,
+        c.c_char_p,
+    ]
+    lib.EVP_EncryptInit_ex.restype = c.c_int
+    lib.EVP_CIPHER_CTX_set_padding.argtypes = [c.c_void_p, c.c_int]
+    lib.EVP_CIPHER_CTX_set_padding.restype = c.c_int
+    lib.EVP_EncryptUpdate.argtypes = [
+        c.c_void_p,
+        c.c_char_p,
+        c.POINTER(c.c_int),
+        c.c_char_p,
+        c.c_int,
+    ]
+    lib.EVP_EncryptUpdate.restype = c.c_int
+    lib.EVP_EncryptFinal_ex.argtypes = [c.c_void_p, c.c_char_p, c.POINTER(c.c_int)]
+    lib.EVP_EncryptFinal_ex.restype = c.c_int
+    lib.EVP_CIPHER_CTX_free.argtypes = [c.c_void_p]
+    lib.EVP_CIPHER_CTX_free.restype = None
+
+    ctx = lib.EVP_CIPHER_CTX_new()
+    if not ctx:
+        raise RuntimeError("EVP_CIPHER_CTX_new failed")
+    try:
+        if lib.EVP_EncryptInit_ex(ctx, lib.EVP_aes_256_cbc(), None, key, iv) != 1:
+            raise RuntimeError("EVP_EncryptInit_ex failed")
+        lib.EVP_CIPHER_CTX_set_padding(ctx, 0)  # container manages its own length
+        out = c.create_string_buffer(len(data) + 16)
+        outlen = c.c_int(0)
+        if lib.EVP_EncryptUpdate(ctx, out, c.byref(outlen), data, len(data)) != 1:
+            raise RuntimeError("EVP_EncryptUpdate failed")
+        total = outlen.value
+        fin = c.create_string_buffer(16)
+        finlen = c.c_int(0)
+        if lib.EVP_EncryptFinal_ex(ctx, fin, c.byref(finlen)) != 1:
+            raise RuntimeError("EVP_EncryptFinal_ex failed")
+        return out.raw[:total] + fin.raw[: finlen.value]
+    finally:
+        lib.EVP_CIPHER_CTX_free(ctx)
+
+
+# Same backends, in the same preference order, for the encrypt direction.
+_ENC_BACKENDS = (
+    ("pycryptodome", lambda: _mod_available("Crypto"), _try_crypto_enc),
+    ("cryptography", lambda: _mod_available("cryptography"), _try_cryptography_enc),
+    ("openssl", lambda: _load_libcrypto() is not None, _try_openssl_enc),
+    ("pure-python", lambda: True, _pure_encrypt_cbc),
+)
+
+
+def encrypt_cbc(key: bytes, iv: bytes, data: bytes) -> bytes:
+    """AES-256-CBC encrypt, using the first backend that is available.
+
+    Raw CBC over a block-multiple plaintext; callers that need padding (the
+    .jkbms container uses PKCS#7) apply it before calling.
+    """
+    last = None
+    for _name, avail, fn in _ENC_BACKENDS:
+        try:
+            if not avail():
+                continue
+            return fn(key, iv, data)
+        except ImportError:
+            continue
+        except Exception as exc:  # noqa: BLE001  # pragma: no cover - the next backend gets its turn
+            last = exc
+            continue
+    raise RuntimeError("no AES backend succeeded: %r" % last)
+
+
 if __name__ == "__main__":
     # FIPS-197 Appendix C.3 known-answer test for AES-256, run against every
     # backend that is available on this host (all must agree with the vector).
@@ -345,6 +515,7 @@ if __name__ == "__main__":
     )
     ct = bytes.fromhex("8ea2b7ca516745bfeafc49904b496089")
     pt = bytes.fromhex("00112233445566778899aabbccddeeff")
+    enc_by_name = {n: fn for n, _a, fn in _ENC_BACKENDS}
     for name, avail, fn in _BACKENDS:
         try:
             ok = avail()
@@ -354,6 +525,8 @@ if __name__ == "__main__":
             print("%-12s: not available" % name)
             continue
         got = fn(key, b"\x00" * 16, ct)
-        assert got == pt, "%s KAT FAIL: %s" % (name, got.hex())
-        print("%-12s: AES-256 KAT OK" % name)
+        assert got == pt, "%s decrypt KAT FAIL: %s" % (name, got.hex())
+        back = enc_by_name[name](key, b"\x00" * 16, pt)
+        assert back == ct, "%s encrypt KAT FAIL: %s" % (name, back.hex())
+        print("%-12s: AES-256 KAT OK (both directions)" % name)
     print("selected backend:", backend_name())

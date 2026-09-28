@@ -446,8 +446,10 @@ to find out.
 The flash itself asks with the word typed out. While it runs it owns the
 serial port outright — after the arming write the link is a raw XMODEM
 stream, so the live refresh stops and every other request queues behind it,
-and the link pill says *flashing* for the duration. **This transfer path has
-never been run against a real BMS.**
+and the link pill says *flashing* for the duration. This path has succeeded on
+repeated flashes of official V15.41 to a `JK_PB2A16S20P`. Other model, hardware
+and firmware combinations remain unverified, and the captured bootloader has no
+end-to-end image or length check.
 
 ## When something will not work
 

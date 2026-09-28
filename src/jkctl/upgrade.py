@@ -34,10 +34,12 @@ Recovered from three functions in jk-bms-monitor.exe 3.11.0:
 Total block count is ceil(len(image)/128) -- FUN_1400181b0 @ 0x1400181b0, the
 progress bar's maximum.
 
-The receiving side is the BMS bootloader at 0x08000000-0x08003FFF, which is not
-contained in any .jkbms file (those hold only the application at 0x08004000),
-so the device side could not be cross-checked against firmware.  Everything
-above comes from the sender.
+The receiver was subsequently recovered from a V2.0.2 bootloader dumped from
+one JK_PB2A16S20P running V15.41. It accepts this packet format, checks only the
+block number/complement and additive checksum, writes from 0x08002000 without
+an upper bound, accepts EOT at any length, and launches when the initial stack
+pointer resembles SRAM. That device completed one upgrade successfully; other
+bootloader versions remain unverified.
 """
 
 from __future__ import annotations

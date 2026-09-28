@@ -10,7 +10,7 @@
  * so the tile that needs attention is the tile that looks different.
  */
 
-import { Badge, DASH, Empty, fixed, Picker, Stat } from '/core/js/ui.js';
+import { Badge, DASH, Empty, fixed, Lines, Picker, Stat } from '/core/js/ui.js';
 import { html } from '/core/vendor/preact-htm.module.js';
 
 /* Above this spread the balancer is not keeping up; JK's own trigger is far
@@ -42,15 +42,31 @@ function activity(row) {
   return words;
 }
 
+/* The line that names the tile, in the header's shape.
+ *
+ * The serial number no two units share leads it, because that is what the
+ * header and the board picker name a board by everywhere else -- the bank
+ * tile was the one place that led with the address instead.  The Modbus
+ * address follows it, lighter, because that is not the name but the handle:
+ * it is in the URL, it is what `--id` takes, and it is what the DIP switches
+ * on the board are set to, so which address a serial is at is worth saying.
+ * A board that gave no serial is already titled by its address (`idOf`), so
+ * the address is not then repeated after it. */
+function nameLine(row) {
+  return row.serial
+    ? html`${idOf(row, row.id)} <span class="addr">BMS ${row.id}</span>`
+    : idOf(row, row.id);
+}
+
 function Tile({ row, selected, onOpen }) {
   const tone = tileTone(row);
   if (!row.ok) {
     return html`<button class=${`tile ${tone}`} onClick=${() => onOpen(row.id)}>
       <div class="tile-head">
-        <span class="id">BMS ${row.id}</span>
+        <${Lines} primary=${nameLine(row)} secondary=${row.error || 'this address did not answer'} />
+        <span class="spacer" style="flex:1"></span>
         <${Badge}>no answer<//>
       </div>
-      <div class="muted">${row.error || 'this address did not answer'}</div>
     </button>`;
   }
   const words = activity(row);
@@ -59,8 +75,7 @@ function Tile({ row, selected, onOpen }) {
     onClick=${() => onOpen(row.id)}
   >
     <div class="tile-head">
-      <span class="id">BMS ${row.id}</span>
-      <span class="muted" style="font-size:var(--fs-xs)">${row.model || DASH}</span>
+      <${Lines} primary=${nameLine(row)} secondary=${madeOf(row)} />
       <span class="spacer" style="flex:1"></span>
       ${row.alarms?.length
         ? html`<${Badge} tone="bad" title=${row.alarms.join('\n')}>${row.alarms.length} alarm${row.alarms.length === 1 ? '' : 's'}<//>`

@@ -749,12 +749,13 @@ def post_action(ctx: Context, req: Request) -> Response:
 
 
 def get_history(ctx: Context, req: Request) -> Response:
-    """Read the board's own stored fault records, where a board maps them.
+    """Attempt the stored fault records over the wire (see :func:`post_history_dump`).
 
-    Answers with ``supported: false`` and the reason rather than with an
-    error, because "this board does not map them" is the expected answer
-    today: which register window serves the fault records, if any, is
-    unresolved.  A tab that says so is more use than one that fails.
+    Answers with ``supported: false`` and the reason rather than an error:
+    stock firmware does not serve the records over Modbus (the firmware bounds
+    a read to frames 01-03 and keeps the records where only Bluetooth reaches
+    them), so the expected outcome here is a clear "not over the wire -- load a
+    flash dump", which the tab offers.
     """
     slave = _unit(ctx, req)
     base = req.param("base")
@@ -770,6 +771,37 @@ def get_history(ctx: Context, req: Request) -> Response:
         {
             "id": slave,
             "supported": True,
+            "source": "wire",
+            "why": "",
+            "records": [schema.record_json(r) for r in records],
+        }
+    )
+
+
+def post_history_dump(ctx: Context, req: Request) -> Response:
+    """Decode the stored fault records out of an uploaded full flash image.
+
+    The records are not on the wire, but a full flash dump of a patched board
+    holds them; this reads the record ring straight out of the uploaded image
+    and touches no hardware, so it works whatever the connected unit is running
+    (and even with none connected).
+    """
+    path = spool(
+        req,
+        max_bytes=MAX_UPLOAD_BYTES,
+        prefix="jkctl-ui-",
+        suffix=".bin",
+        too_large="that file is far larger than a 128 KiB flash image",
+    )
+    try:
+        image = path.read_bytes()
+    finally:
+        discard(path)
+    records = HI.read_dump(image)
+    return ok(
+        {
+            "supported": True,
+            "source": "dump",
             "why": "",
             "records": [schema.record_json(r) for r in records],
         }
@@ -856,7 +888,16 @@ def post_firmware_flash(ctx: Context, req: Request) -> Response:
                 fw.image,
                 report=JobReporter(job, unit="block"),
             )
-            return {"id": slave, "version": fw.version}
+            # A reboot can leave the RTC at the firmware's default, and the
+            # board keeps no time zone, so re-sync it to local time rather than
+            # leave the clock a zone offset out.  Best effort: never fail a
+            # good flash over a clock.
+            worker.notify_progress(job, 1.0, "syncing the clock")
+            result = {"id": slave, "version": fw.version}
+            synced = C.resync_clock_after_flash(device)
+            if synced is not None:
+                result["clockSet"] = synced.isoformat(timespec="seconds")
+            return result
         finally:
             discard(path)
 
@@ -976,6 +1017,7 @@ ROUTES: dict[tuple[str, str], Route[Context]] = {
     ("POST", "/api/protocol"): Route(post_protocol, write=True),
     ("POST", "/api/action"): Route(post_action, write=True),
     ("POST", "/api/import"): Route(post_import, write=True),
+    ("POST", "/api/history/dump"): Route(post_history_dump, raw_body=True),
     ("POST", "/api/firmware/check"): Route(post_firmware_check, raw_body=True),
     ("POST", "/api/firmware/flash"): Route(
         post_firmware_flash, write=True, raw_body=True

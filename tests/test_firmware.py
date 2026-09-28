@@ -143,17 +143,17 @@ def test_the_compatibility_gate_in_the_vendors_own_order(jkbms):
     fw = F.load(jkbms(version="15.42"))
 
     # A different major version is refused outright, --force or not.
-    with pytest.raises(F.FirmwareError, match="Major version"):
+    with pytest.raises(F.FirmwareError, match="major version"):
         F.check_compatible(fw, "JK_PB2A16S20P", "19.02")
-    with pytest.raises(F.FirmwareError, match="Major version"):
+    with pytest.raises(F.FirmwareError, match="major version"):
         F.check_compatible(fw, "JK_PB2A16S20P", "19.02", force=True)
 
     # The same or a newer minor is refused unless forced.
-    with pytest.raises(F.FirmwareError, match="Minor version"):
+    with pytest.raises(F.FirmwareError, match="minor version"):
         F.check_compatible(fw, "JK_PB2A16S20P", "15.42")
 
     # The model is checked past the minor gate, and --force never waives it.
-    with pytest.raises(F.FirmwareError, match="Device Identify"):
+    with pytest.raises(F.FirmwareError, match="model"):
         F.check_compatible(fw, "JK_PB1A16S10P", "15.42", force=True)
 
     # An upgrade of the right model passes.
@@ -162,7 +162,7 @@ def test_the_compatibility_gate_in_the_vendors_own_order(jkbms):
 
 def test_an_unreadable_device_version_is_refused(jkbms):
     fw = F.load(jkbms())
-    with pytest.raises(F.FirmwareError, match="unparsable device version"):
+    with pytest.raises(F.FirmwareError, match="version could not be read"):
         F.check_compatible(fw, "JK_PB2A16S20P", "")
 
 
@@ -264,12 +264,12 @@ def test_gate_reports_every_step_not_only_the_first_refusal():
     fw = a_firmware()
     checks = F.gate(fw, "JK_OTHER_MODEL", "15.41")
     names = [c.name for c in checks]
-    assert "major version matches" in names
-    assert "minor version is newer" in names
-    assert "model matches" in names
+    assert "major version" in names
+    assert "minor version" in names
+    assert "model" in names
     # two refusals, both reported: not newer, and the wrong board
     blocking = [c.name for c in checks if c.blocking]
-    assert blocking == ["minor version is newer", "model matches"]
+    assert blocking == ["minor version", "model"]
 
 
 def test_force_waives_the_minor_version_but_never_the_model():
@@ -277,9 +277,9 @@ def test_force_waives_the_minor_version_but_never_the_model():
 
     fw = a_firmware()
     checks = {c.name: c for c in F.gate(fw, "JK_OTHER", "15.41", force=True)}
-    assert checks["minor version is newer"].waived
-    assert not checks["minor version is newer"].blocking
-    assert checks["model matches"].blocking
+    assert checks["minor version"].waived
+    assert not checks["minor version"].blocking
+    assert checks["model"].blocking
 
 
 def test_scan_reads_a_tree_and_keeps_a_bad_file_as_a_reason(tmp_path, monkeypatch):
@@ -300,3 +300,94 @@ def test_scan_reads_a_tree_and_keeps_a_bad_file_as_a_reason(tmp_path, monkeypatc
     assert len(found) == 2
     assert found[0].firmware is not None and found[0].firmware.model == "JK_PB2A16S20P"
     assert found[1].firmware is None and found[1].error  # unreadable, sorted last
+
+
+# --- the repack encoder (build / repack): real AES, no stubs ---------------- #
+#
+# These go end to end through the actual cipher -- build() encrypts, load()
+# decrypts -- so they also exercise aes.encrypt_cbc against the same backend
+# load() uses.  The metadata header lives inside the image at 0x200, so an
+# image for build() is a payload without its 12-byte trailer.
+
+
+def make_image(**kwargs) -> bytes:
+    """A valid image (payload minus trailer) carrying a metadata header."""
+    return make_payload(**kwargs)[: -F.TRAILER]
+
+
+def test_build_round_trips_through_real_aes(tmp_path):
+    image = make_image(version="15.41", model="JK_PB2A16S20P", device_code=73)
+    path = tmp_path / "built.jkbms"
+    path.write_bytes(F.build(image, build_ms=1_700_000_000_000, valid_hours=0))
+    fw = F.load(str(path))
+    assert fw.image == image
+    assert (fw.model, fw.version, fw.device_code) == ("JK_PB2A16S20P", "15.41", 73)
+    assert (fw.build_ms, fw.valid_hours) == (1_700_000_000_000, 0)
+
+
+def test_build_output_is_a_block_multiple_and_reloads(tmp_path):
+    blob = F.build(make_image())
+    assert len(blob) % F.AES_BLOCK == 0
+    path = tmp_path / "b.jkbms"
+    path.write_bytes(blob)
+    assert F.load(str(path)).image == make_image()
+
+
+def test_build_refuses_an_image_too_small_for_a_header():
+    with pytest.raises(F.FirmwareError, match="metadata header"):
+        F.build(b"\x00" * (F.DEVICE_CODE_OFF))  # one field short
+
+
+def test_repack_bumps_the_version_and_leaves_the_rest(tmp_path):
+    src = tmp_path / "src.jkbms"
+    src.write_bytes(F.build(make_image(version="15.41")))
+    fw = F.load(str(src))
+
+    out = tmp_path / "out.jkbms"
+    out.write_bytes(F.repack(fw, version="15.99"))
+    bumped = F.load(str(out))
+
+    assert (bumped.major, bumped.minor) == (15, 99)
+    # everything but the 16-byte version field at 0x200 is unchanged
+    a, b = bytearray(fw.image), bytearray(bumped.image)
+    a[0x200:0x210] = b[0x200:0x210] = b"\x00" * 16
+    assert bytes(a) == bytes(b)
+
+
+def test_repack_swaps_the_image(tmp_path):
+    src = tmp_path / "src.jkbms"
+    src.write_bytes(F.build(make_image()))
+    fw = F.load(str(src))
+
+    patched = make_image(model="JK_PB2A16S20P")
+    patched = patched[:0x300] + b"\xa5" + patched[0x301:]  # a one-byte "patch"
+    out = tmp_path / "out.jkbms"
+    out.write_bytes(F.repack(fw, image=patched))
+    assert F.load(str(out)).image == patched
+
+
+def _valid_hours_of(blob: bytes, tmp_path) -> int:
+    path = tmp_path / "vh.jkbms"
+    path.write_bytes(blob)
+    return F.load(str(path)).valid_hours
+
+
+def test_repack_keeps_source_expiry_and_can_override_it(tmp_path):
+    src = tmp_path / "src.jkbms"
+    src.write_bytes(F.build(make_image(), build_ms=1_700_000_000_000, valid_hours=24))
+    fw = F.load(str(src))
+    assert _valid_hours_of(F.repack(fw), tmp_path) == 24  # kept by default
+    assert _valid_hours_of(F.repack(fw, valid_hours=0), tmp_path) == 0  # overridden
+
+
+def test_repack_rejects_a_bad_version(tmp_path):
+    src = tmp_path / "src.jkbms"
+    src.write_bytes(F.build(make_image()))
+    fw = F.load(str(src))
+    with pytest.raises(F.FirmwareError, match="major.minor"):
+        F.repack(fw, version="15")
+
+
+def test_set_header_field_rejects_an_overlong_value():
+    with pytest.raises(F.FirmwareError, match="too long"):
+        F.set_header_field(make_image(), F.HDR_BASE, "x" * 16)

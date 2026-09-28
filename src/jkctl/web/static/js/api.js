@@ -25,6 +25,7 @@ export const doctor = (id) => get(`/api/doctor${query({ id })}`);
 export const protocols = (id) => get(`/api/protocols${query({ id })}`);
 export const samples = (id) => get(`/api/samples${query({ id })}`);
 export const history = (id, base) => get(`/api/history${query({ id, base })}`);
+export const historyDump = (bytes) => upload('/api/history/dump', bytes);
 export const logCodes = () => get('/api/log-codes');
 export const library = (id, dir) => get(`/api/firmware/library${query({ id, dir })}`);
 

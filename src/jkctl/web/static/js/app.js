@@ -936,6 +936,8 @@ function App() {
       busy=${steady}
       onRead=${async () =>
         setHistory(await guard('reading the history', () => api.history(unitId)))}
+      onDump=${async (bytes) =>
+        setHistory(await guard('reading the flash dump', () => api.historyDump(bytes)))}
       onCodes=${async () =>
         setLogCodes((await guard('reading the code table', () => api.logCodes())).codes)}
     />`),

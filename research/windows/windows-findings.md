@@ -76,7 +76,7 @@ Windows app is the source of truth.
 # ROUND 2 -- container cracked, validation recovered, transport identified
 ---------------------------------------------------------------------------
 
-## 9. .jkbms container -- SOLVED (verified on all 63 files, 0 failures)
+## 9. .jkbms container -- SOLVED (verified on all 67 files, 0 failures)
 
     file     = AES-256-CBC(key, iv=0) over payload_blob
     key      = b"A39FF3F613F94FDD957EC22EF642ADA9"   (32 ASCII bytes, used raw)
@@ -86,9 +86,9 @@ Windows app is the source of truth.
     payload[-12:] = int64_le build_ms || int32_le valid_hours
     image    = payload[:-12]                 <- the bytes actually flashed
 
-Image is raw ARM Cortex-M linked at **0x08004000** (vector table 0x144 bytes,
-first handler exactly 0x08004144).  Bootloader occupies 0x08000000-0x08003FFF
-and is NOT shipped in any .jkbms file.
+CORRECTION (`research/firmware/flash-dump-analysis.md`): every
+at **0x08002000**, not 0x08004000. The 8 KiB below it is absent from `.jkbms`;
+application callsites write persistent pages at 0x08001800 and 0x08001C00.
 
 ### Metadata header, at payload offset 0x200 (6 x 16-byte NUL-padded ASCII)
     0x200 software version   "19.02"
@@ -278,7 +278,7 @@ BACKWARDS for the first of {0x06 ACK, 0x15 NAK, 0x18 CAN}
     CAN -> abort
 Total blocks = ceil(len(image)/128)  (FUN_1400181b0, the progress bar maximum).
 
-The bootloader (0x08000000-0x08003FFF) is in no .jkbms file, so the device side
+The receiver is below the application and is in no `.jkbms`, so the device side
 could not be cross-checked; all of the above is from the sender.
 
 ## 20. Deliverables (jkbms_tool/)
@@ -350,8 +350,8 @@ transfer exists publicly as far as the search reached.
 Secondary: several sources describe a hardware recovery path -- hold RST while
 plugging the USB-TTL cable, the device enumerates as "STM32 BOOTLOADER" (the
 built-in ST system bootloader, speakable with stm32flash).  Useful as an
-anti-brick route, but it needs a full image INCLUDING 0x08000000-0x08003FFF,
-which no .jkbms file contains.  Sourcing on this was weak (SEO content farm);
+anti-brick route, but it needs a full image including the whole region below
+the application, which no `.jkbms` file contains. Sourcing on this was weak;
 treat as unverified.
 
 ## 24. Model
@@ -366,15 +366,16 @@ report it, and that string is what the compatibility gate compares against.
 Target MCU (from firmware static analysis):
   Cortex-M3, STM32F1 family (or register-compatible clone GD32/APM32/CKS)
   - RCC 0x40021000, FLASH 0x40022000, GPIOA 0x40010800 = F1 signature
-  - >=128 KiB flash (app ~96 KiB above the 16 KiB bootloader), >20 KiB RAM used
+  - 128 or 256 KiB flash (all 67 audited apps start at 0x08002000); RAM use varies by hardware line
   - app self-programs flash (FLASH_KEYR keys 0x45670123/0xCDEF89AB present)
   - app does NOT touch option bytes/RDP (OPTKEY 0x08192A3B/0x4C5D6E7F absent)
 Note: F1 ROM bootloader is UART-only (no USB DFU) -> the "USB STM32 BOOTLOADER"
 web story does not apply to this chip. ST ROM bootloader needs BOOT0=high; the
 JK 0x5AA5 path enters JK's OWN bootloader, a different thing.
 Full bench procedure to attempt a bootloader dump via stm32flash (and the one
-mass-erase trap to avoid) is written up in re/docs/bootloader-dump-procedure.md.
-Not required for the tool; confirmation-only.
+mass-erase trap to avoid) is written up in
+`research/firmware/bootloader-dump-procedure.md`. Not required for
+the tool; confirmation-only.
 
 ## 26. First live-device probe (2026-09-07) + two corrections
 Ran jk_probe.py against the real BMS on /dev/ttyUSB0. Results:
@@ -868,11 +869,12 @@ probe.
 # ROUND 7 -- firmware upgrade re-audit before publishing (2026-09-26)
 ---------------------------------------------------------------------------
 
-## §40  The bytes are proven; the device's defence against bad bytes is not
+## §40  The bytes are proven; one device path is measured
 
-A pre-publication re-check of the whole upgrade path, since it has never run on
-metal and a wrong flash bricks a battery.  Two questions: does the tool send
-the wrong data, and does the BMS check what it is given.
+The initial pre-publication audit separated two questions: does the tool send
+the intended bytes, and does the BMS check what it is given? A later physical
+PB2A16S20P/V15.41 run and full-flash capture now answer the second question for
+that one bootloader.
 
 **Container -> image, verified to the byte.**  `firmware.load()` decrypts and
 inflates `73-JK-PB2A16S20P-V19.02.jkbms` and extracts an image whose SHA-256
@@ -895,17 +897,15 @@ against the simulator over a socat pty (V15.41, `--force`): 720/720 blocks, the
 `--save-image` capture is byte-identical to the source.  This matches §19 and
 the byte-for-byte-corroborated arming write of §22.
 
-**Does the BMS self-check after upload?  Unknown, and unknowable from what we
-have.**  The receiver is the bootloader at `0x08000000-0x08003FFF`, which is in
-no `.jkbms` and has never been dumped (see `bootloader-dump-procedure.md`).
-The application image we *do* have (`fw.bin`, `0x08004000`+) references the
-STM32 hardware CRC unit (`0x40023000`) **zero** times and does not touch the
-option bytes (no `OPTKEY`), so nothing in the application points to a
-self-integrity check; but the application is not the code that receives and
-commits a new image, so this is only weak, indirect evidence.  On the wire the
-sole integrity guard is XMODEM's 8-bit additive per-block checksum -- enough to
-catch most random corruption of a block, far too weak to be relied on, and no
-end-to-end check of the whole image at all.
+**Device-side checks, recovered from JK bootloader V2.0.2.** The receiver
+matches the sender: it checks the block number and complement and XMODEM's
+8-bit additive checksum, erases at page boundaries, and writes 128 bytes before
+ACK. It has no signature, model/version check, expected image length,
+destination upper bound, whole-image CRC/hash or write readback. EOT ends the
+transfer at any length. Main then checks only that the application's initial
+stack pointer resembles SRAM before loading it and branching through the reset
+vector. The successful V15.41 upgrade proves the happy path on that device, not
+defence against malformed images or behavior of other bootloader versions.
 
 **The hand-off, and why a dead app cannot re-arm.**  The application's whole
 role in an upgrade is a hand-off, confirmed in `fw.bin` by static bytes:
@@ -917,24 +917,57 @@ present too, so the app *can* self-program flash, but for its own settings, not
 to receive a firmware image.  The upshot for recovery: the arming path runs in
 the application, so once the app is dead there is nothing to receive the RS485
 arming write or set the flag -- the upgrade cannot be re-triggered over the
-wire.  Whether the bootloader stays resident and waits for XMODEM when the app's
-vector table is invalid is unknown (it could not be read).
+wire. The captured bootloader remains resident below `0x08002000`, but a dead
+application still cannot issue the RS485 arming write.
 
-**Brick model.**  A `.jkbms` holds only the application (`0x08004000`+), never
-the bootloader, so a wrong/interrupted flash is *expected* to leave the
-bootloader intact and only the app broken -- expected, not measured.  Recovery
-then is the STM32 ROM bootloader (BOOT0 high, `stm32flash`), not JK's: with RDP
-off it can rewrite the application region from the extracted image and leave the
-JK bootloader alone; with RDP on, clearing protection mass-erases the JK
-bootloader too, and recovery needs a full image no `.jkbms` contains (§23, §25,
-`bootloader-dump-procedure.md`).
+**Brick model.** A `.jkbms` holds only the application (`0x08002000` on all 67
+audited builds), never the pre-application region. The captured receiver starts
+writing at `0x08002000`, preserving the bootloader for a normally sized image,
+but has no upper bound. Recovery from a dead app is through the STM32 ROM
+bootloader (BOOT0 high, `stm32flash`), not JK's: with RDP off it can rewrite the
+application region and leave JK's bootloader alone; clearing RDP mass-erases
+the bootloader too. The full dumper capture now provides recovery material for
+the one measured PB2A16S20P, not for arbitrary boards.
 
-**Conclusion.**  The risk is not that `jkctl` sends the wrong bytes -- it sends
-the vendor's exactly.  The risk is that the BMS is not known to reject bytes
-that are wrong for any other reason (a truncated transfer, a checksum
-collision, a mismatched-but-well-formed image), because its receiver could not
-be examined and the path has never touched hardware; and that if the app is
-left dead, re-arming needs the bench, not the wire.  Recorded for the user in
-the CLI (`firmware flash` prints it before every flash), the web UI (a standing
-caveat on the Flash card), the README and `docs/reference.md`, and in
-`devicectl-unification.md`.  Settling it for real needs the bench dump.
+**Conclusion.** `jkctl` sends the intended bytes, and one physical
+PB2A16S20P/V15.41 upgrade completed successfully. The recovered receiver does
+not reject a truncated transfer, enforce the target model/version or provide an
+end-to-end checksum; a checksum-colliding or otherwise wrong image can still be
+written and may run. If the app is left dead, re-arming needs the bench, not the
+wire. The CLI, web UI, README and reference documentation state both the one
+successful result and its narrow scope.
+
+---------------------------------------------------------------------------
+# ROUND 8 -- full-flash patch across every archived hardware line
+---------------------------------------------------------------------------
+
+## §41  67 images, 33 layouts; two cross-hardware breakages fixed
+
+The dump-patch audit now covers every `.jkbms` in the archive: 38 HW V14, 17
+HW V15, one V17 and eleven V19 applications. All 67 link at `0x08002000`, carry
+the same dispatcher contract and fit the cooperative hook plus relocated table
+below the 128 KiB boundary.
+
+Two assumptions from the V15-only implementation were unsafe:
+
+1. Register `0x1628` is a stock action (`0xc4`) on V17/V19. Those lines also
+   use `0x162a` (`0xfe`), and newer releases use `0x162c` (`0xc5`). `0x162e`
+   is absent from every audited descriptor table and is now the private dump
+   action.
+2. V14/V15 response objects use buffer/length offsets `+4`/`+0`; B-Series and
+   V19 use `+8`/`+2`. An unchanged V15 hook would load and store through the
+   wrong fields. The patcher now rewrites those two Thumb instructions per
+   layout.
+
+The tables have 98, 108, 110, 112, 113 or 115 entries. Early V14 has three
+direct `ADDW` table references, later V14/early V15 has four, and later builds
+use a shared literal pointer. Filename conventions also drift (`JK_` versus
+`JK-`), and the `V14.05` directory contains applications whose own metadata is
+14.03. Full-image SHA-256, in-image identity and explicit patch points remain
+the acceptance boundary. Full evidence and the 33-layout matrix are in
+`research/firmware/flash-dump-analysis.md`.
+
+Subsequently, the V15.41 patch was flashed to one physical PB2A16S20P. It
+booted, continued operating and returned a validated 128 KiB full-flash image.
+That verifies one of the 67 target images; the other 66 retain only static and
+simulator evidence.
